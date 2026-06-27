@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box;}
+  html,body{margin:0;height:100%;background:#05070a;font-family:'DM Sans',sans-serif;}
+  .fn-scroll::-webkit-scrollbar{display:none;}
+  .fn-scroll{scrollbar-width:none;}
+  input[type=range]{-webkit-appearance:none;appearance:none;background:transparent;}
+  input[type=range]::-webkit-slider-runnable-track{height:6px;border-radius:3px;background:#0B0E11;}
+  input[type=range]::-moz-range-track{height:6px;border-radius:3px;background:#0B0E11;}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:22px;height:22px;margin-top:-8px;border-radius:50%;background:#EDF1F5;box-shadow:0 2px 8px rgba(0,0,0,.6);cursor:pointer;}
+  input[type=range]::-moz-range-thumb{width:22px;height:22px;border:none;border-radius:50%;background:#EDF1F5;box-shadow:0 2px 8px rgba(0,0,0,.6);cursor:pointer;}
+  input[type=range]::-webkit-slider-runnable-track{background:linear-gradient(#2BD9D0,#2BD9D0) no-repeat,#0B0E11;}
+</style>
+</helmet>
+
+<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;background:radial-gradient(120% 80% at 50% -10%,#0e1620 0%,#05070a 60%);">
+  <div style="width:390px;height:844px;border-radius:52px;background:#0B0E11;box-shadow:0 50px 100px -30px rgba(0,0,0,.8),0 0 0 1px rgba(255,255,255,.05);padding:11px;position:relative;">
+    <div style="width:100%;height:100%;border-radius:42px;overflow:hidden;background:#0B0E11;position:relative;color:#EDF1F5;font-family:'DM Sans',sans-serif;">
+
+      <!-- ============= PLAN SCREEN ============= -->
+      <sc-if value="{{ isPlan }}" hint-placeholder-val="{{ true }}">
+      <div class="fn-scroll" style="position:absolute;inset:0;overflow-y:auto;display:flex;flex-direction:column;padding-bottom:84px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 26px 4px;font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:600;">
+          <span>{{ nowStr }}</span><span style="letter-spacing:2px;color:#7E8893;">●●●● ⌁ 84</span>
+        </div>
+        <div style="padding:10px 24px 2px;">
+          <div style="font-size:13px;color:#7E8893;letter-spacing:.04em;">Ferry Navigator</div>
+          <div style="font-family:'Space Grotesk',sans-serif;font-size:30px;font-weight:700;letter-spacing:-.02em;">Plan trip</div>
+        </div>
+        <div style="padding:16px 20px 0;display:flex;flex-direction:column;gap:14px;">
+          <!-- from/to -->
+          <div style="background:#161B22;border-radius:20px;padding:6px 8px;position:relative;">
+            <div onClick="{{ pickFrom }}" style="display:flex;align-items:center;gap:14px;padding:15px 12px;border-bottom:1px solid #222A33;cursor:pointer;">
+              <div style="width:11px;height:11px;border-radius:50%;border:2.5px solid #2BD9D0;flex:none;"></div>
+              <div style="flex:1;"><div style="font-size:11px;color:#7E8893;letter-spacing:.08em;text-transform:uppercase;">From</div><div style="font-size:16px;font-weight:600;font-family:'Space Grotesk',sans-serif;">{{ fromName }}</div></div>
+            </div>
+            <div onClick="{{ pickTo }}" style="display:flex;align-items:center;gap:14px;padding:15px 12px;cursor:pointer;">
+              <div style="width:11px;height:11px;border-radius:2px;background:#2BD9D0;flex:none;"></div>
+              <div style="flex:1;"><div style="font-size:11px;color:#7E8893;letter-spacing:.08em;text-transform:uppercase;">To</div><div style="font-size:16px;font-weight:600;font-family:'Space Grotesk',sans-serif;">{{ toName }}</div></div>
+            </div>
+            <div onClick="{{ swap }}" style="position:absolute;right:18px;top:50%;transform:translateY(-50%);width:40px;height:40px;border-radius:50%;background:#0B0E11;border:1px solid #222A33;display:flex;align-items:center;justify-content:center;color:#9aa3ad;font-size:17px;cursor:pointer;">⇅</div>
+          </div>
+          <!-- when -->
+          <div>
+            <div style="display:flex;background:#161B22;border-radius:14px;padding:4px;gap:4px;">
+              <div onClick="{{ setLeaveNow }}" style="flex:1;text-align:center;padding:11px;border-radius:11px;font-size:14px;font-weight:600;cursor:pointer;background:{{ leaveBg }};color:{{ leaveFg }};">Leave now</div>
+              <div onClick="{{ setArriveBy }}" style="flex:1;text-align:center;padding:11px;border-radius:11px;font-size:14px;font-weight:700;cursor:pointer;background:{{ arriveBg }};color:{{ arriveFg }};">Arrive by</div>
+            </div>
+            <sc-if value="{{ modeArrive }}" hint-placeholder-val="{{ true }}">
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 4px 2px;">
+              <span style="color:#7E8893;font-size:14px;">Arrive {{ toName }} by</span>
+              <div style="display:flex;align-items:center;gap:14px;">
+                <div onClick="{{ arriveMinus }}" style="width:34px;height:34px;border-radius:50%;background:#161B22;display:flex;align-items:center;justify-content:center;font-size:20px;cursor:pointer;">−</div>
+                <span style="font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:700;min-width:62px;text-align:center;">{{ arriveByStr }}</span>
+                <div onClick="{{ arrivePlus }}" style="width:34px;height:34px;border-radius:50%;background:#161B22;display:flex;align-items:center;justify-content:center;font-size:20px;cursor:pointer;">+</div>
+              </div>
+            </div>
+            </sc-if>
+            <sc-if value="{{ modeLeave }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 4px 2px;">
+              <span style="color:#7E8893;font-size:14px;">Departing now</span>
+              <span style="font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:700;">{{ nowStr }}</span>
+            </div>
+            </sc-if>
+          </div>
+          <!-- margin -->
+          <div style="background:#161B22;border-radius:20px;padding:18px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <span style="font-size:14px;font-weight:600;">Ferry margin</span>
+              <span style="font-family:'JetBrains Mono',monospace;font-size:18px;font-weight:700;color:#2BD9D0;">{{ marginStr }}</span>
+            </div>
+            <div style="font-size:12px;color:#7E8893;margin-top:4px;">Buffer time to reach each ferry before it leaves</div>
+            <div style="display:flex;gap:8px;margin:14px 0 16px;">
+              <div onClick="{{ preset5 }}" style="flex:1;text-align:center;padding:9px;border-radius:10px;font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;cursor:pointer;background:{{ p5bg }};color:{{ p5fg }};">5</div>
+              <div onClick="{{ preset15 }}" style="flex:1;text-align:center;padding:9px;border-radius:10px;font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;cursor:pointer;background:{{ p15bg }};color:{{ p15fg }};">15</div>
+              <div onClick="{{ preset30 }}" style="flex:1;text-align:center;padding:9px;border-radius:10px;font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;cursor:pointer;background:{{ p30bg }};color:{{ p30fg }};">30</div>
+            </div>
+            <input type="range" min="0" max="45" step="5" value="{{ marginVal }}" onChange="{{ onMargin }}" onInput="{{ onMargin }}" style="width:100%;height:22px;" />
+            <div style="display:flex;justify-content:space-between;font-family:'JetBrains Mono',monospace;font-size:10px;color:#7E8893;margin-top:2px;">
+              <span>0</span><span>15</span><span>30</span><span>45</span>
+            </div>
+          </div>
+          <!-- optimize -->
+          <div>
+            <div style="font-size:12px;color:#7E8893;letter-spacing:.06em;text-transform:uppercase;margin-bottom:8px;padding-left:4px;">Optimize for</div>
+            <div style="display:flex;gap:10px;">
+              <div onClick="{{ optFast }}" style="flex:1;padding:14px;border-radius:14px;background:#161B22;cursor:pointer;border:1.5px solid {{ fastBorder }};">
+                <div style="font-size:14px;font-weight:700;font-family:'Space Grotesk',sans-serif;">Fastest</div>
+                <div style="font-size:11px;color:#7E8893;margin-top:2px;">Use ferries · best ETA</div>
+              </div>
+              <div onClick="{{ optFew }}" style="flex:1;padding:14px;border-radius:14px;background:#161B22;cursor:pointer;border:1.5px solid {{ fewBorder }};">
+                <div style="font-size:14px;font-weight:700;font-family:'Space Grotesk',sans-serif;">Fewest ferries</div>
+                <div style="font-size:11px;color:#7E8893;margin-top:2px;">Inland · no waiting</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div style="padding:18px 20px 10px;">
+          <div onClick="{{ findRoute }}" style="background:#2BD9D0;color:#04181A;text-align:center;padding:17px;border-radius:18px;font-size:16px;font-weight:700;font-family:'Space Grotesk',sans-serif;cursor:pointer;box-shadow:0 8px 24px -6px rgba(43,217,208,.5);">Find route</div>
+        </div>
+      </div>
+      </sc-if>
+
+      <!-- ============= RESULTS SCREEN ============= -->
+      <sc-if value="{{ isResults }}" hint-placeholder-val="{{ false }}">
+      <div style="position:absolute;inset:0;display:flex;flex-direction:column;">
+        <!-- map -->
+        <div style="position:relative;height:262px;background:radial-gradient(120% 90% at 70% 8%,#16232b 0%,#0B0E11 70%);overflow:hidden;flex:none;">
+          <div style="position:absolute;width:240px;height:160px;left:-40px;top:96px;background:#10303A;filter:blur(28px);opacity:.7;border-radius:50%;"></div>
+          <div style="position:absolute;width:200px;height:130px;right:-30px;top:-14px;background:#10303A;filter:blur(26px);opacity:.6;border-radius:50%;"></div>
+          <sc-if value="{{ isFerryRoute }}" hint-placeholder-val="{{ true }}">
+          <svg viewBox="0 0 390 250" style="position:absolute;inset:0;width:100%;height:100%;filter:drop-shadow(0 0 5px rgba(43,217,208,.45));">
+            <path d="M52,206 C 88,202 104,188 130,174" fill="none" stroke="#2BD9D0" stroke-width="4" stroke-linecap="round"/>
+            <path d="M130,174 L182,154" fill="none" stroke="#37C2F0" stroke-width="4" stroke-linecap="round" stroke-dasharray="2 9"/>
+            <path d="M182,154 C 212,146 228,134 252,120" fill="none" stroke="#2BD9D0" stroke-width="4" stroke-linecap="round"/>
+            <path d="M252,120 L300,102" fill="none" stroke="#37C2F0" stroke-width="4" stroke-linecap="round" stroke-dasharray="2 9"/>
+            <path d="M300,102 C 322,92 332,72 350,52" fill="none" stroke="#2BD9D0" stroke-width="4" stroke-linecap="round"/>
+            <circle cx="52" cy="206" r="6" fill="#0B0E11" stroke="#2BD9D0" stroke-width="3"/>
+            <circle cx="350" cy="52" r="6.5" fill="#2BD9D0"/>
+            <rect x="150" y="158" width="11" height="11" rx="2" transform="rotate(45 156 164)" fill="#0B0E11" stroke="#37C2F0" stroke-width="2.5"/>
+            <rect x="270" y="105" width="11" height="11" rx="2" transform="rotate(45 276 111)" fill="#0B0E11" stroke="#37C2F0" stroke-width="2.5"/>
+          </svg>
+          </sc-if>
+          <sc-if value="{{ isInlandRoute }}" hint-placeholder-val="{{ false }}">
+          <svg viewBox="0 0 390 250" style="position:absolute;inset:0;width:100%;height:100%;filter:drop-shadow(0 0 5px rgba(43,217,208,.4));">
+            <path d="M52,206 C 120,196 150,150 200,140 C 260,128 300,96 350,52" fill="none" stroke="#2BD9D0" stroke-width="4" stroke-linecap="round"/>
+            <circle cx="52" cy="206" r="6" fill="#0B0E11" stroke="#2BD9D0" stroke-width="3"/>
+            <circle cx="350" cy="52" r="6.5" fill="#2BD9D0"/>
+          </svg>
+          </sc-if>
+          <div onClick="{{ back }}" style="position:absolute;left:18px;top:16px;width:42px;height:42px;border-radius:50%;background:rgba(11,14,17,.72);backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;font-size:20px;border:1px solid #222A33;cursor:pointer;">‹</div>
+          <div style="position:absolute;right:18px;top:20px;padding:8px 14px;border-radius:30px;background:rgba(11,14,17,.72);backdrop-filter:blur(6px);font-size:12px;font-weight:600;border:1px solid #222A33;">{{ routeTag }}</div>
+          <div style="position:absolute;left:18px;bottom:34px;font-family:'Space Grotesk',sans-serif;font-size:13px;font-weight:600;color:#9aa3ad;">{{ fromName }} → {{ toName }}</div>
+        </div>
+        <!-- sheet -->
+        <div class="fn-scroll" style="flex:1;background:#11151B;border-radius:26px 26px 0 0;margin-top:-22px;position:relative;padding:8px 20px 0;display:flex;flex-direction:column;overflow-y:auto;z-index:2;">
+          <div style="width:38px;height:4px;border-radius:2px;background:#2a323b;margin:8px auto 14px;"></div>
+          <div style="font-size:12px;color:#7E8893;letter-spacing:.06em;text-transform:uppercase;">{{ leaveLabel }}</div>
+          <div style="display:flex;align-items:baseline;gap:14px;">
+            <div style="font-family:'JetBrains Mono',monospace;font-size:46px;font-weight:700;letter-spacing:-.02em;color:#2BD9D0;">{{ leaveByStr }}</div>
+            <div style="color:#7E8893;font-size:13px;line-height:1.35;">arrive {{ arriveStr }}<br>{{ totalStr }}</div>
+          </div>
+          <div style="display:flex;gap:7px;margin:14px 0 12px;flex-wrap:wrap;">
+            <span style="padding:6px 12px;border-radius:30px;background:#161B22;font-size:12px;font-weight:600;font-family:'JetBrains Mono',monospace;">{{ distanceStr }}</span>
+            <span style="padding:6px 12px;border-radius:30px;background:#161B22;font-size:12px;font-weight:600;">{{ ferriesStr }}</span>
+            <span style="padding:6px 12px;border-radius:30px;background:rgba(43,217,208,.12);color:#2BD9D0;font-size:12px;font-weight:600;">{{ marginStr }} margin</span>
+          </div>
+          <div onClick="{{ toggleOpt }}" style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-radius:14px;border:1px dashed #2a323b;margin-bottom:14px;cursor:pointer;">
+            <div>
+              <div style="font-size:11px;color:#7E8893;text-transform:uppercase;letter-spacing:.06em;">{{ altLabel }}</div>
+              <div style="font-size:13px;color:#cfd6dd;margin-top:2px;">{{ altSummary }}</div>
+            </div>
+            <span style="color:#2BD9D0;font-size:13px;font-weight:600;white-space:nowrap;">Switch →</span>
+          </div>
+          <!-- timeline -->
+          <div style="padding-top:2px;">
+            <sc-for list="{{ steps }}" as="step" hint-placeholder-count="4">
+            <div style="display:flex;gap:14px;">
+              <div style="display:flex;flex-direction:column;align-items:center;width:14px;flex:none;">
+                <sc-if value="{{ step.isDepart }}" hint-placeholder-val="{{ true }}"><div style="width:12px;height:12px;border-radius:50%;border:3px solid #2BD9D0;margin-top:3px;"></div></sc-if>
+                <sc-if value="{{ step.isFerry }}" hint-placeholder-val="{{ false }}"><div style="width:13px;height:13px;border-radius:3px;background:#37C2F0;transform:rotate(45deg);margin-top:4px;"></div></sc-if>
+                <sc-if value="{{ step.isArrive }}" hint-placeholder-val="{{ false }}"><div style="width:14px;height:14px;border-radius:50%;background:#2BD9D0;margin-top:3px;"></div></sc-if>
+                <sc-if value="{{ step.notLast }}" hint-placeholder-val="{{ true }}"><div style="width:2px;flex:1;background:#2a323b;min-height:34px;"></div></sc-if>
+              </div>
+              <div style="flex:1;padding-bottom:18px;">
+                <div onClick="{{ step.onTap }}" style="cursor:{{ step.cursor }};">
+                  <div style="font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:700;color:{{ step.timeColor }};">{{ step.time }}</div>
+                  <div style="font-size:15px;font-weight:600;font-family:'Space Grotesk',sans-serif;">{{ step.title }}</div>
+                  <div style="font-size:12px;color:#7E8893;">{{ step.sub }}</div>
+                  <sc-if value="{{ step.hasSub2 }}" hint-placeholder-val="{{ false }}"><div style="font-size:12px;color:#7E8893;margin-top:1px;">{{ step.sub2 }}</div></sc-if>
+                </div>
+              </div>
+            </div>
+            </sc-for>
+          </div>
+          <div style="position:sticky;bottom:0;background:#11151B;display:flex;align-items:center;gap:12px;padding:12px 0 20px;border-top:1px solid #1c2027;margin-top:4px;">
+            <div style="flex:1;"><div style="font-family:'JetBrains Mono',monospace;font-size:20px;font-weight:700;">{{ costTotal }}</div><div style="font-size:11px;color:#7E8893;">{{ costBreak }}</div></div>
+            <div onClick="{{ saveTrip }}" style="padding:14px 18px;border-radius:16px;background:#161B22;border:1px solid #222A33;font-size:14px;font-weight:700;cursor:pointer;color:{{ saveColor }};">{{ saveLabel }}</div>
+            <div onClick="{{ openTT0 }}" style="padding:14px 22px;border-radius:16px;background:#2BD9D0;color:#04181A;font-size:14px;font-weight:700;font-family:'Space Grotesk',sans-serif;cursor:pointer;">Times</div>
+          </div>
+        </div>
+      </div>
+      </sc-if>
+
+      <!-- ============= TIMETABLE SCREEN ============= -->
+      <sc-if value="{{ isTimetable }}" hint-placeholder-val="{{ false }}">
+      <div class="fn-scroll" style="position:absolute;inset:0;overflow-y:auto;padding-bottom:84px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 26px 4px;font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:600;">
+          <span>{{ nowStr }}</span><span style="letter-spacing:2px;color:#7E8893;">●●●● ⌁ 84</span>
+        </div>
+        <div style="padding:8px 24px 0;display:flex;align-items:center;gap:14px;">
+          <div onClick="{{ back }}" style="width:40px;height:40px;border-radius:50%;background:#161B22;display:flex;align-items:center;justify-content:center;font-size:20px;cursor:pointer;">‹</div>
+          <div style="font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:700;">Ferry times</div>
+        </div>
+        <div style="display:flex;gap:8px;padding:18px 24px 6px;">
+          <div onClick="{{ setFerry0 }}" style="flex:1;text-align:center;padding:11px;border-radius:12px;font-size:13px;font-weight:700;cursor:pointer;background:{{ tt0bg }};color:{{ tt0fg }};">Anda–Lote</div>
+          <div onClick="{{ setFerry1 }}" style="flex:1;text-align:center;padding:11px;border-radius:12px;font-size:13px;font-weight:700;cursor:pointer;background:{{ tt1bg }};color:{{ tt1fg }};">Festøya–Solavågen</div>
+        </div>
+        <div style="padding:10px 24px;display:flex;gap:18px;color:#7E8893;font-size:12px;">
+          <span>Crossing {{ ttCross }}</span><span>Your ferry highlighted</span>
+        </div>
+        <div style="padding:6px 20px 0;display:flex;flex-direction:column;gap:8px;">
+          <sc-for list="{{ ttItems }}" as="t" hint-placeholder-count="8">
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:15px 18px;border-radius:14px;background:{{ t.bg }};border:1px solid {{ t.border }};">
+            <div style="display:flex;align-items:center;gap:14px;">
+              <span style="font-family:'JetBrains Mono',monospace;font-size:18px;font-weight:700;color:{{ t.timeColor }};">{{ t.time }}</span>
+              <span style="font-size:12px;color:#7E8893;">→ {{ t.arr }}</span>
+            </div>
+            <span style="font-size:12px;font-weight:700;color:{{ t.tagColor }};">{{ t.tag }}</span>
+          </div>
+          </sc-for>
+        </div>
+      </div>
+      </sc-if>
+
+      <!-- ============= SAVED SCREEN ============= -->
+      <sc-if value="{{ isSaved }}" hint-placeholder-val="{{ false }}">
+      <div class="fn-scroll" style="position:absolute;inset:0;overflow-y:auto;padding-bottom:84px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 26px 4px;font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:600;">
+          <span>{{ nowStr }}</span><span style="letter-spacing:2px;color:#7E8893;">●●●● ⌁ 84</span>
+        </div>
+        <div style="padding:10px 24px 2px;">
+          <div style="font-family:'Space Grotesk',sans-serif;font-size:30px;font-weight:700;letter-spacing:-.02em;">Saved trips</div>
+        </div>
+        <div style="padding:18px 20px 0;display:flex;flex-direction:column;gap:12px;">
+          <sc-if value="{{ hasSaved }}" hint-placeholder-val="{{ false }}">
+          <sc-for list="{{ savedItems }}" as="s" hint-placeholder-count="2">
+          <div onClick="{{ s.open }}" style="background:#161B22;border-radius:18px;padding:16px 18px;cursor:pointer;display:flex;align-items:center;gap:14px;">
+            <div style="flex:1;">
+              <div style="font-family:'Space Grotesk',sans-serif;font-size:16px;font-weight:700;">{{ s.fromName }} → {{ s.toName }}</div>
+              <div style="font-size:12px;color:#7E8893;margin-top:3px;">{{ s.sub }}</div>
+            </div>
+            <div style="text-align:right;">
+              <div style="font-family:'JetBrains Mono',monospace;font-size:18px;font-weight:700;color:#2BD9D0;">{{ s.leaveByStr }}</div>
+              <div style="font-size:11px;color:#7E8893;">leave by</div>
+            </div>
+          </div>
+          </sc-for>
+          </sc-if>
+          <sc-if value="{{ noSaved }}" hint-placeholder-val="{{ true }}">
+          <div style="text-align:center;padding:80px 20px;color:#7E8893;">
+            <div style="font-size:40px;margin-bottom:12px;opacity:.5;">☆</div>
+            <div style="font-size:15px;">No saved trips yet</div>
+            <div style="font-size:13px;margin-top:6px;">Plan a route and tap Save to keep it here.</div>
+          </div>
+          </sc-if>
+        </div>
+      </div>
+      </sc-if>
+
+      <!-- ============= BOTTOM TAB BAR ============= -->
+      <sc-if value="{{ showTabs }}" hint-placeholder-val="{{ true }}">
+      <div style="position:absolute;left:0;right:0;bottom:0;height:74px;background:rgba(11,14,17,.92);backdrop-filter:blur(12px);border-top:1px solid #1c2027;display:flex;align-items:flex-start;padding:12px 30px 0;">
+        <div onClick="{{ tabPlan }}" style="flex:1;text-align:center;cursor:pointer;color:{{ tabPlanColor }};">
+          <div style="font-size:20px;line-height:1;">◎</div>
+          <div style="font-size:11px;font-weight:600;margin-top:5px;">Plan</div>
+        </div>
+        <div onClick="{{ tabSaved }}" style="flex:1;text-align:center;cursor:pointer;color:{{ tabSavedColor }};">
+          <div style="font-size:20px;line-height:1;">★</div>
+          <div style="font-size:11px;font-weight:600;margin-top:5px;">Saved</div>
+        </div>
+        <div onClick="{{ tabTimes }}" style="flex:1;text-align:center;cursor:pointer;color:{{ tabTimesColor }};">
+          <div style="font-size:20px;line-height:1;">⛴</div>
+          <div style="font-size:11px;font-weight:600;margin-top:5px;">Times</div>
+        </div>
+      </div>
+      </sc-if>
+
+      <!-- ============= LOCATION PICKER OVERLAY ============= -->
+      <sc-if value="{{ picking }}" hint-placeholder-val="{{ false }}">
+      <div onClick="{{ closePick }}" style="position:absolute;inset:0;background:rgba(5,7,10,.6);backdrop-filter:blur(2px);z-index:10;"></div>
+      <div style="position:absolute;left:0;right:0;bottom:0;background:#161B22;border-radius:26px 26px 0 0;z-index:11;padding:10px 0 18px;max-height:70%;display:flex;flex-direction:column;">
+        <div style="width:38px;height:4px;border-radius:2px;background:#2a323b;margin:8px auto 8px;"></div>
+        <div style="padding:6px 24px 12px;font-family:'Space Grotesk',sans-serif;font-size:18px;font-weight:700;">Choose {{ pickingLabel }}</div>
+        <div class="fn-scroll" style="overflow-y:auto;">
+          <sc-for list="{{ placeItems }}" as="p" hint-placeholder-count="6">
+          <div onClick="{{ p.choose }}" style="display:flex;align-items:center;gap:14px;padding:15px 24px;cursor:pointer;border-top:1px solid #1c2027;">
+            <div style="width:9px;height:9px;border-radius:50%;background:{{ p.dot }};flex:none;"></div>
+            <div style="flex:1;font-size:16px;font-weight:600;">{{ p.name }}</div>
+            <sc-if value="{{ p.selected }}" hint-placeholder-val="{{ false }}"><span style="color:#2BD9D0;font-weight:700;">✓</span></sc-if>
+          </div>
+          </sc-for>
+        </div>
+      </div>
+      </sc-if>
+
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:412,&quot;height&quot;:892},&quot;defaultMargin&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:10,&quot;min&quot;:0,&quot;max&quot;:45,&quot;step&quot;:5,&quot;unit&quot;:&quot; min&quot;,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Defaults&quot;}}">
+class Component extends DCLogic {
+  state = {
+    screen: 'plan',
+    fromName: 'Bremanger',
+    toName: 'Ålesund',
+    mode: 'arrive',
+    arriveBy: 1080,        // 18:00
+    margin: null,          // falls back to prop/default
+    optimize: 'fast',
+    selectedFerry: 0,
+    picking: null,
+    saved: [],
+    justSaved: false,
+  };
+
+  now = 785; // 13:05 demo clock
+
+  FERRIES = [
+    { name: 'Anda–Lote', cross: 20, fare: 124, dep: this.gen(360, 1380, 30) },
+    { name: 'Festøya–Solavågen', cross: 20, fare: 124, dep: this.gen(330, 1410, 20) },
+  ];
+  DRIVES = [ { dur: 78, km: 76 }, { dur: 99, km: 98 }, { dur: 26, km: 24 } ];
+  PLACES = ['Bremanger','Ålesund','Florø','Måløy','Nordfjordeid','Volda','Stryn','Hjelle'];
+
+  gen(a, b, step) { const r = []; for (let t = a; t <= b; t += step) r.push(t); return r; }
+  pad(n) { return (n < 10 ? '0' : '') + n; }
+  fmt(m) { m = ((Math.round(m) % 1440) + 1440) % 1440; return this.pad(Math.floor(m / 60)) + ':' + this.pad(m % 60); }
+  dur(m) { m = Math.round(m); const h = Math.floor(m / 60), mm = m % 60; if (h && mm) return h + 'h ' + mm + 'm'; if (h) return h + 'h'; return mm + 'm'; }
+  latest(deps, lim) { let r = deps[0]; for (const d of deps) { if (d <= lim) r = d; } return r; }
+  earliest(deps, min) { for (const d of deps) { if (d >= min) return d; } return deps[deps.length - 1]; }
+
+  effMargin() { return this.state.margin == null ? (this.props.defaultMargin ?? 15) : this.state.margin; }
+
+  componentDidMount() {
+    try { const s = JSON.parse(localStorage.getItem('ferrynav.saved') || '[]'); if (Array.isArray(s)) this.setState({ saved: s }); } catch (e) {}
+  }
+  persist(saved) { try { localStorage.setItem('ferrynav.saved', JSON.stringify(saved)); } catch (e) {} }
+
+  // ---- core scheduling ----
+  compute(optimize) {
+    const { mode, arriveBy, fromName, toName } = this.state;
+    const margin = this.effMargin();
+    if (optimize === 'fewferry') {
+      const D = 328;
+      const leaveBy = mode === 'arrive' ? arriveBy - D : this.now;
+      const arrive = leaveBy + D;
+      const steps = [
+        this.node('depart', leaveBy, '#EDF1F5', 'Depart ' + fromName, 'Drive ' + this.dur(D) + ' · 214 km', '', true, null),
+        this.node('arrive', arrive, '#2BD9D0', 'Arrive ' + toName, 'Inland route · trip complete', '', false, null),
+      ];
+      return { leaveBy, arrive, total: arrive - leaveBy, distance: 214, ferries: 0, cost: 150, costBreak: 'Toll 150 · no ferries', steps, boarded: [null, null], isFerry: false };
+    }
+    // ferry route
+    const F0 = this.FERRIES[0], F1 = this.FERRIES[1];
+    let leaveBy;
+    if (mode === 'arrive') {
+      let t = arriveBy;
+      t -= this.DRIVES[2].dur;
+      const d2 = this.latest(F1.dep, t - F1.cross); t = d2 - margin;
+      t -= this.DRIVES[1].dur;
+      const d1 = this.latest(F0.dep, t - F0.cross); t = d1 - margin;
+      t -= this.DRIVES[0].dur;
+      leaveBy = t;
+    } else { leaveBy = this.now; }
+    // forward sim
+    let t = leaveBy;
+    const steps = [];
+    steps.push(this.node('depart', leaveBy, '#EDF1F5', 'Depart ' + fromName, 'Drive ' + this.dur(this.DRIVES[0].dur) + ' · ' + this.DRIVES[0].km + ' km', '', true, null));
+    t += this.DRIVES[0].dur;
+    const q1 = t, b1 = this.earliest(F0.dep, q1 + margin), buf1 = b1 - q1;
+    steps.push(this.node('ferry', b1, '#37C2F0', 'Ferry · ' + F0.name, buf1 + ' min buffer · ' + F0.cross + ' min crossing', 'then drive ' + this.dur(this.DRIVES[1].dur) + ' · ' + this.DRIVES[1].km + ' km', true, 0));
+    t = b1 + F0.cross + this.DRIVES[1].dur;
+    const q2 = t, b2 = this.earliest(F1.dep, q2 + margin), buf2 = b2 - q2;
+    steps.push(this.node('ferry', b2, '#37C2F0', 'Ferry · ' + F1.name, buf2 + ' min buffer · ' + F1.cross + ' min crossing', 'then drive ' + this.dur(this.DRIVES[2].dur) + ' · ' + this.DRIVES[2].km + ' km', true, 1));
+    t = b2 + F1.cross + this.DRIVES[2].dur;
+    const arrive = t;
+    steps.push(this.node('arrive', arrive, '#2BD9D0', 'Arrive ' + toName, 'Trip complete', '', false, null));
+    return { leaveBy, arrive, total: arrive - leaveBy, distance: 198, ferries: 2, cost: 344, costBreak: 'Ferry 248 · Toll 96', steps, boarded: [b1, b2], isFerry: true };
+  }
+
+  node(type, time, timeColor, title, sub, sub2, notLast, ferryIdx) {
+    return {
+      isDepart: type === 'depart', isFerry: type === 'ferry', isArrive: type === 'arrive',
+      time: this.fmt(time), timeColor, title, sub, sub2, hasSub2: !!sub2, notLast,
+      cursor: ferryIdx != null ? 'pointer' : 'default',
+      onTap: ferryIdx != null ? () => this.setState({ screen: 'timetable', selectedFerry: ferryIdx }) : () => {},
+    };
+  }
+
+  // ---- handlers ----
+  go(screen) { this.setState({ screen, picking: null }); }
+  setMargin(v) { this.setState({ margin: v, justSaved: false }); }
+
+  saveTrip(R) {
+    const { fromName, toName, mode, arriveBy, optimize } = this.state;
+    const entry = {
+      fromName, toName, mode, arriveBy, optimize, margin: this.effMargin(),
+      leaveByStr: this.fmt(R.leaveBy),
+      sub: (R.ferries ? R.ferries + ' ferries' : 'Inland') + ' · ' + this.dur(R.total) + ' · arrive ' + this.fmt(R.arrive),
+    };
+    const dup = this.state.saved.some(s => s.leaveByStr === entry.leaveByStr && s.optimize === entry.optimize && s.toName === entry.toName);
+    if (dup) { this.setState({ justSaved: true }); return; }
+    const saved = [entry, ...this.state.saved];
+    this.persist(saved);
+    this.setState({ saved, justSaved: true });
+  }
+
+  openSaved(s) {
+    this.setState({ fromName: s.fromName, toName: s.toName, mode: s.mode, arriveBy: s.arriveBy, optimize: s.optimize, margin: s.margin, screen: 'results', justSaved: false });
+  }
+
+  renderVals() {
+    const st = this.state;
+    const R = this.compute(st.optimize);
+    const other = this.compute(st.optimize === 'fast' ? 'fewferry' : 'fast');
+    const margin = this.effMargin();
+    const sel = (a, on) => a === on;
+    const ACC = '#2BD9D0', PANEL = '#161B22', MUT = '#7E8893';
+
+    // timetable items
+    const fIdx = st.selectedFerry;
+    const F = this.FERRIES[fIdx];
+    const boarded = R.boarded[fIdx];
+    const center = boarded != null ? boarded : 720;
+    const ttItems = F.dep.filter(d => d >= center - 100 && d <= center + 150).map(d => {
+      const isB = d === boarded;
+      return {
+        time: this.fmt(d), arr: this.fmt(d + F.cross),
+        bg: isB ? 'rgba(43,217,208,.12)' : PANEL,
+        border: isB ? ACC : '#222A33',
+        timeColor: isB ? ACC : '#EDF1F5',
+        tag: isB ? 'YOUR FERRY' : '', tagColor: ACC,
+      };
+    });
+
+    const placeItems = this.PLACES.map(name => ({
+      name,
+      choose: () => {
+        const k = st.picking === 'from' ? 'fromName' : 'toName';
+        this.setState({ [k]: name, picking: null, justSaved: false });
+      },
+      selected: name === (st.picking === 'from' ? st.fromName : st.toName),
+      dot: st.picking === 'from' ? 'transparent' : ACC,
+    }));
+    // give from-dots a ring look
+    placeItems.forEach(p => { if (st.picking === 'from') p.dot = '#37C2F0'; });
+
+    const savedItems = st.saved.map(s => ({ ...s, open: () => this.openSaved(s) }));
+
+    return {
+      // screen flags
+      isPlan: st.screen === 'plan', isResults: st.screen === 'results',
+      isTimetable: st.screen === 'timetable', isSaved: st.screen === 'saved',
+      showTabs: st.screen !== 'results',
+      // common
+      nowStr: this.fmt(this.now),
+      fromName: st.fromName, toName: st.toName,
+      marginVal: margin, marginStr: margin + ' min',
+      // mode
+      modeArrive: st.mode === 'arrive', modeLeave: st.mode === 'leave',
+      arriveByStr: this.fmt(st.arriveBy),
+      leaveBg: st.mode === 'leave' ? ACC : 'transparent', leaveFg: st.mode === 'leave' ? '#04181A' : MUT,
+      arriveBg: st.mode === 'arrive' ? ACC : 'transparent', arriveFg: st.mode === 'arrive' ? '#04181A' : MUT,
+      setLeaveNow: () => this.setState({ mode: 'leave', justSaved: false }),
+      setArriveBy: () => this.setState({ mode: 'arrive', justSaved: false }),
+      arriveMinus: () => this.setState({ arriveBy: Math.max(360, st.arriveBy - 15), justSaved: false }),
+      arrivePlus: () => this.setState({ arriveBy: Math.min(1410, st.arriveBy + 15), justSaved: false }),
+      // margin presets
+      p5bg: sel(margin, 5) ? ACC : '#0B0E11', p5fg: sel(margin, 5) ? '#04181A' : MUT,
+      p15bg: sel(margin, 15) ? ACC : '#0B0E11', p15fg: sel(margin, 15) ? '#04181A' : MUT,
+      p30bg: sel(margin, 30) ? ACC : '#0B0E11', p30fg: sel(margin, 30) ? '#04181A' : MUT,
+      preset5: () => this.setMargin(5), preset15: () => this.setMargin(15), preset30: () => this.setMargin(30),
+      onMargin: (e) => this.setMargin(parseInt(e.target.value, 10)),
+      // optimize
+      fastBorder: st.optimize === 'fast' ? ACC : '#222A33',
+      fewBorder: st.optimize === 'fewferry' ? ACC : '#222A33',
+      optFast: () => this.setState({ optimize: 'fast', justSaved: false }),
+      optFew: () => this.setState({ optimize: 'fewferry', justSaved: false }),
+      // nav
+      findRoute: () => this.go('results'),
+      back: () => this.go('plan'),
+      swap: () => this.setState({ fromName: st.toName, toName: st.fromName, justSaved: false }),
+      pickFrom: () => this.setState({ picking: 'from' }),
+      pickTo: () => this.setState({ picking: 'to' }),
+      closePick: () => this.setState({ picking: null }),
+      picking: !!st.picking, pickingLabel: st.picking === 'from' ? 'start' : 'destination',
+      placeItems,
+      // results
+      isFerryRoute: R.isFerry, isInlandRoute: !R.isFerry,
+      routeTag: R.ferries ? R.ferries + ' ferries' : 'No ferries',
+      leaveLabel: st.mode === 'arrive' ? 'Leave by' : 'Departing',
+      leaveByStr: this.fmt(R.leaveBy), arriveStr: this.fmt(R.arrive), totalStr: this.dur(R.total),
+      distanceStr: R.distance + ' km', ferriesStr: R.ferries ? R.ferries + ' ferries' : 'No ferries',
+      costTotal: R.cost + ' kr', costBreak: R.costBreak,
+      steps: R.steps,
+      altLabel: st.optimize === 'fast' ? 'Fewer ferries instead' : 'Faster with ferries',
+      altSummary: (other.ferries ? other.ferries + ' ferries' : 'Inland · no ferries') + ' · ' + this.dur(other.total),
+      toggleOpt: () => this.setState({ optimize: st.optimize === 'fast' ? 'fewferry' : 'fast', justSaved: false }),
+      saveTrip: () => this.saveTrip(R),
+      saveLabel: st.justSaved ? 'Saved ✓' : 'Save',
+      saveColor: st.justSaved ? ACC : '#EDF1F5',
+      openTT0: () => this.setState({ screen: 'timetable', selectedFerry: 0 }),
+      // timetable
+      ttItems, ttCross: F.cross + ' min',
+      tt0bg: fIdx === 0 ? ACC : PANEL, tt0fg: fIdx === 0 ? '#04181A' : '#EDF1F5',
+      tt1bg: fIdx === 1 ? ACC : PANEL, tt1fg: fIdx === 1 ? '#04181A' : '#EDF1F5',
+      setFerry0: () => this.setState({ selectedFerry: 0 }), setFerry1: () => this.setState({ selectedFerry: 1 }),
+      // saved
+      hasSaved: st.saved.length > 0, noSaved: st.saved.length === 0, savedItems,
+      // tabs
+      tabPlan: () => this.go('plan'), tabSaved: () => this.go('saved'), tabTimes: () => this.go('timetable'),
+      tabPlanColor: st.screen === 'plan' ? ACC : MUT,
+      tabSavedColor: st.screen === 'saved' ? ACC : MUT,
+      tabTimesColor: st.screen === 'timetable' ? ACC : MUT,
+    };
+  }
+}
+</script>
+</body>
+</html>

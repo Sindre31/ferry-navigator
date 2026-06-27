@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box;}
+  .fn-screen::-webkit-scrollbar{display:none;}
+</style>
+</helmet>
+
+<div style="position:absolute;left:0px;top:0px;width:840px;font-family:'Space Grotesk',sans-serif;">
+  <div data-drags-parent="1" style="font-size:13px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:#5a626b;margin-bottom:6px;">Ferry Navigator · 3 directions</div>
+  <div style="font-family:'DM Sans',sans-serif;font-size:15px;color:#7b828b;max-width:620px;line-height:1.5;">Bremanger → Ålesund, two ferries (Anda–Lote, Festøya–Solavågen). Each direction shows the route planner and the ferry-aware results timeline. Pick a direction and I'll build the interactive flow.</div>
+</div>
+
+<!-- ============ DIRECTION A · MIDNIGHT CYAN ============ -->
+<div style="position:absolute;left:0px;top:110px;width:360px;font-family:'Space Grotesk',sans-serif;">
+  <div data-drags-parent="1" style="font-size:12px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:#5a626b;margin-bottom:8px;">A · Midnight Cyan — Planning</div>
+  <div style="width:360px;height:760px;border-radius:44px;background:#0B0E11;box-shadow:0 34px 70px -22px rgba(0,0,0,.6),0 0 0 1px rgba(255,255,255,.05);padding:9px;">
+    <div class="fn-screen" style="width:100%;height:100%;border-radius:36px;overflow:hidden;background:#0B0E11;display:flex;flex-direction:column;color:#EDF1F5;position:relative;">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 22px 6px;font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:600;">
+        <span>13:05</span><span style="letter-spacing:2px;color:#8a929c;">●●●● ⌁ 84</span>
+      </div>
+      <div style="padding:8px 22px 0;">
+        <div style="font-size:26px;font-weight:700;letter-spacing:-.01em;">Plan trip</div>
+      </div>
+      <div style="padding:16px 18px 0;display:flex;flex-direction:column;gap:14px;overflow:hidden;">
+        <!-- from/to -->
+        <div style="background:#161B22;border-radius:20px;padding:6px 8px;position:relative;">
+          <div style="display:flex;align-items:center;gap:14px;padding:14px 12px;border-bottom:1px solid #222A33;">
+            <div style="width:11px;height:11px;border-radius:50%;border:2.5px solid #2BD9D0;flex:none;"></div>
+            <div style="flex:1;"><div style="font-size:11px;color:#7E8893;letter-spacing:.08em;text-transform:uppercase;">From</div><div style="font-size:16px;font-weight:600;">Bremanger</div></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:14px;padding:14px 12px;">
+            <div style="width:11px;height:11px;border-radius:2px;background:#2BD9D0;flex:none;"></div>
+            <div style="flex:1;"><div style="font-size:11px;color:#7E8893;letter-spacing:.08em;text-transform:uppercase;">To</div><div style="font-size:16px;font-weight:600;">Ålesund</div></div>
+          </div>
+          <div style="position:absolute;right:18px;top:50%;transform:translateY(-50%);width:38px;height:38px;border-radius:50%;background:#0B0E11;border:1px solid #222A33;display:flex;align-items:center;justify-content:center;color:#8a929c;font-size:16px;">⇅</div>
+        </div>
+        <!-- when -->
+        <div>
+          <div style="display:flex;background:#161B22;border-radius:14px;padding:4px;gap:4px;">
+            <div style="flex:1;text-align:center;padding:11px;border-radius:11px;color:#7E8893;font-size:14px;font-weight:600;">Leave now</div>
+            <div style="flex:1;text-align:center;padding:11px;border-radius:11px;background:#2BD9D0;color:#04181A;font-size:14px;font-weight:700;">Arrive by</div>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:baseline;padding:14px 6px 2px;">
+            <span style="color:#7E8893;font-size:14px;">Arrive Ålesund by</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:700;">18:00</span>
+          </div>
+        </div>
+        <!-- margin -->
+        <div style="background:#161B22;border-radius:20px;padding:18px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <span style="font-size:14px;font-weight:600;">Ferry margin</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:18px;font-weight:700;color:#2BD9D0;">15 min</span>
+          </div>
+          <div style="display:flex;gap:8px;margin:14px 0 16px;">
+            <div style="flex:1;text-align:center;padding:9px;border-radius:10px;background:#0B0E11;color:#7E8893;font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:600;">5</div>
+            <div style="flex:1;text-align:center;padding:9px;border-radius:10px;background:#2BD9D0;color:#04181A;font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;">15</div>
+            <div style="flex:1;text-align:center;padding:9px;border-radius:10px;background:#0B0E11;color:#7E8893;font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:600;">30</div>
+          </div>
+          <div style="position:relative;height:6px;background:#0B0E11;border-radius:3px;">
+            <div style="position:absolute;left:0;top:0;height:6px;width:46%;background:#2BD9D0;border-radius:3px;"></div>
+            <div style="position:absolute;left:46%;top:50%;transform:translate(-50%,-50%);width:22px;height:22px;border-radius:50%;background:#EDF1F5;box-shadow:0 2px 8px rgba(0,0,0,.5);"></div>
+          </div>
+        </div>
+        <!-- optimize -->
+        <div style="display:flex;gap:10px;">
+          <div style="flex:1;text-align:center;padding:13px;border-radius:13px;background:#161B22;border:1.5px solid #2BD9D0;font-size:13px;font-weight:700;">Fastest</div>
+          <div style="flex:1;text-align:center;padding:13px;border-radius:13px;background:#161B22;border:1.5px solid #222A33;font-size:13px;font-weight:600;color:#7E8893;">Fewest ferries</div>
+        </div>
+      </div>
+      <div style="margin-top:auto;padding:14px 18px 22px;">
+        <div style="background:#2BD9D0;color:#04181A;text-align:center;padding:17px;border-radius:18px;font-size:16px;font-weight:700;">Find route</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div style="position:absolute;left:416px;top:110px;width:360px;font-family:'Space Grotesk',sans-serif;">
+  <div data-drags-parent="1" style="font-size:12px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:#5a626b;margin-bottom:8px;">A · Midnight Cyan — Results</div>
+  <div style="width:360px;height:760px;border-radius:44px;background:#0B0E11;box-shadow:0 34px 70px -22px rgba(0,0,0,.6),0 0 0 1px rgba(255,255,255,.05);padding:9px;">
+    <div style="width:100%;height:100%;border-radius:36px;overflow:hidden;background:#0B0E11;display:flex;flex-direction:column;color:#EDF1F5;position:relative;">
+      <!-- map -->
+      <div style="position:relative;height:248px;background:radial-gradient(120% 90% at 70% 10%,#16232b 0%,#0B0E11 70%);overflow:hidden;flex:none;">
+        <div style="position:absolute;width:240px;height:160px;left:-40px;top:90px;background:#10303A;filter:blur(28px);opacity:.7;border-radius:50%;"></div>
+        <div style="position:absolute;width:200px;height:130px;right:-30px;top:-20px;background:#10303A;filter:blur(26px);opacity:.6;border-radius:50%;"></div>
+        <svg viewBox="0 0 360 240" style="position:absolute;inset:0;width:100%;height:100%;filter:drop-shadow(0 0 5px rgba(43,217,208,.45));">
+          <path d="M46,200 C 80,196 96,182 120,168" fill="none" stroke="#2BD9D0" stroke-width="4" stroke-linecap="round"/>
+          <path d="M120,168 L168,150" fill="none" stroke="#37C2F0" stroke-width="4" stroke-linecap="round" stroke-dasharray="2 9"/>
+          <path d="M168,150 C 196,142 210,132 232,118" fill="none" stroke="#2BD9D0" stroke-width="4" stroke-linecap="round"/>
+          <path d="M232,118 L276,100" fill="none" stroke="#37C2F0" stroke-width="4" stroke-linecap="round" stroke-dasharray="2 9"/>
+          <path d="M276,100 C 296,90 306,74 322,52" fill="none" stroke="#2BD9D0" stroke-width="4" stroke-linecap="round"/>
+          <circle cx="46" cy="200" r="6" fill="#0B0E11" stroke="#2BD9D0" stroke-width="3"/>
+          <circle cx="322" cy="52" r="6.5" fill="#2BD9D0"/>
+          <rect x="138" y="153" width="11" height="11" rx="2" transform="rotate(45 144 159)" fill="#0B0E11" stroke="#37C2F0" stroke-width="2.5"/>
+          <rect x="248" y="103" width="11" height="11" rx="2" transform="rotate(45 254 109)" fill="#0B0E11" stroke="#37C2F0" stroke-width="2.5"/>
+        </svg>
+        <div style="position:absolute;left:16px;top:16px;width:40px;height:40px;border-radius:50%;background:rgba(11,14,17,.7);backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;font-size:18px;border:1px solid #222A33;">‹</div>
+        <div style="position:absolute;right:16px;top:18px;padding:8px 13px;border-radius:30px;background:rgba(11,14,17,.7);backdrop-filter:blur(6px);font-size:12px;font-weight:600;border:1px solid #222A33;">2 ferries</div>
+      </div>
+      <!-- sheet -->
+      <div style="flex:1;background:#11151B;border-radius:26px 26px 0 0;margin-top:-22px;position:relative;padding:8px 20px 0;display:flex;flex-direction:column;overflow:hidden;">
+        <div style="width:38px;height:4px;border-radius:2px;background:#2a323b;margin:8px auto 14px;"></div>
+        <div style="font-size:12px;color:#7E8893;letter-spacing:.06em;text-transform:uppercase;">Leave by</div>
+        <div style="display:flex;align-items:baseline;gap:12px;">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:40px;font-weight:700;letter-spacing:-.02em;">13:05</div>
+          <div style="color:#7E8893;font-size:13px;line-height:1.3;">arrive 17:42<br>4h 37m</div>
+        </div>
+        <div style="display:flex;gap:7px;margin:14px 0 12px;flex-wrap:wrap;">
+          <span style="padding:6px 12px;border-radius:30px;background:#161B22;font-size:12px;font-weight:600;font-family:'JetBrains Mono',monospace;">198 km</span>
+          <span style="padding:6px 12px;border-radius:30px;background:#161B22;font-size:12px;font-weight:600;">2 ferries</span>
+          <span style="padding:6px 12px;border-radius:30px;background:rgba(43,217,208,.12);color:#2BD9D0;font-size:12px;font-weight:600;">15 min margin</span>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:11px 14px;border-radius:14px;border:1px dashed #2a323b;margin-bottom:6px;">
+          <span style="font-size:13px;color:#aab2bb;">Inland · no ferries · <b style="color:#EDF1F5;font-family:'JetBrains Mono',monospace;">5h 28m</b></span>
+          <span style="color:#7E8893;">→</span>
+        </div>
+        <!-- timeline -->
+        <div style="overflow:hidden;padding-top:8px;">
+          <div style="display:flex;gap:14px;">
+            <div style="display:flex;flex-direction:column;align-items:center;width:14px;flex:none;">
+              <div style="width:12px;height:12px;border-radius:50%;border:3px solid #2BD9D0;"></div>
+              <div style="width:2px;flex:1;background:linear-gradient(#2BD9D0,#37C2F0);min-height:30px;"></div>
+            </div>
+            <div style="flex:1;padding-bottom:18px;">
+              <div style="font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:700;">13:05</div>
+              <div style="font-size:15px;font-weight:600;">Depart Bremanger</div>
+              <div style="font-size:12px;color:#7E8893;">Drive 1h 18m · 76 km</div>
+            </div>
+          </div>
+          <div style="display:flex;gap:14px;">
+            <div style="display:flex;flex-direction:column;align-items:center;width:14px;flex:none;">
+              <div style="width:13px;height:13px;border-radius:3px;background:#37C2F0;transform:rotate(45deg);"></div>
+              <div style="width:2px;flex:1;background:linear-gradient(#37C2F0,#2BD9D0);min-height:30px;"></div>
+            </div>
+            <div style="flex:1;padding-bottom:18px;">
+              <div style="font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:700;color:#37C2F0;">14:39</div>
+              <div style="font-size:15px;font-weight:600;">Ferry · Anda–Lote</div>
+              <div style="font-size:12px;color:#7E8893;">16 min buffer · crossing 20 min</div>
+            </div>
+          </div>
+          <div style="display:flex;gap:14px;">
+            <div style="display:flex;flex-direction:column;align-items:center;width:14px;flex:none;">
+              <div style="width:13px;height:13px;border-radius:3px;background:#37C2F0;transform:rotate(45deg);"></div>
+              <div style="width:2px;flex:1;background:linear-gradient(#37C2F0,#2BD9D0);min-height:24px;"></div>
+            </div>
+            <div style="flex:1;padding-bottom:14px;">
+              <div style="font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:700;color:#37C2F0;">16:56</div>
+              <div style="font-size:15px;font-weight:600;">Ferry · Festøya–Solavågen</div>
+              <div style="font-size:12px;color:#7E8893;">18 min buffer · crossing 20 min</div>
+            </div>
+          </div>
+        </div>
+        <div style="margin-top:auto;display:flex;align-items:center;gap:12px;padding:14px 0 20px;">
+          <div style="flex:1;"><div style="font-family:'JetBrains Mono',monospace;font-size:20px;font-weight:700;">344 kr</div><div style="font-size:11px;color:#7E8893;">Ferry 248 · Toll 96</div></div>
+          <div style="padding:15px 28px;border-radius:16px;background:#2BD9D0;color:#04181A;font-size:15px;font-weight:700;">Start</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ DIRECTION B · DEEP FJORD ============ -->
+<div style="position:absolute;left:0px;top:1010px;width:360px;font-family:'Space Grotesk',sans-serif;">
+  <div data-drags-parent="1" style="font-size:12px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:#5a626b;margin-bottom:8px;">B · Deep Fjord — Planning</div>
+  <div style="width:360px;height:760px;border-radius:44px;background:#0A1822;box-shadow:0 34px 70px -22px rgba(0,0,0,.6),0 0 0 1px rgba(255,255,255,.05);padding:9px;">
+    <div class="fn-screen" style="width:100%;height:100%;border-radius:36px;overflow:hidden;background:#0A1822;display:flex;flex-direction:column;color:#EAF2F2;position:relative;">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 22px 6px;font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:600;">
+        <span>13:05</span><span style="letter-spacing:2px;color:#6F94A0;">●●●● ⌁ 84</span>
+      </div>
+      <div style="padding:8px 22px 0;"><div style="font-size:26px;font-weight:700;letter-spacing:-.01em;">Plan trip</div></div>
+      <div style="padding:16px 18px 0;display:flex;flex-direction:column;gap:14px;overflow:hidden;">
+        <div style="background:#0F2531;border-radius:20px;padding:6px 8px;position:relative;">
+          <div style="display:flex;align-items:center;gap:14px;padding:14px 12px;border-bottom:1px solid #1C3743;">
+            <div style="width:11px;height:11px;border-radius:50%;border:2.5px solid #46C2B0;flex:none;"></div>
+            <div style="flex:1;"><div style="font-size:11px;color:#6F94A0;letter-spacing:.08em;text-transform:uppercase;">From</div><div style="font-size:16px;font-weight:600;">Bremanger</div></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:14px;padding:14px 12px;">
+            <div style="width:11px;height:11px;border-radius:2px;background:#F2B441;flex:none;"></div>
+            <div style="flex:1;"><div style="font-size:11px;color:#6F94A0;letter-spacing:.08em;text-transform:uppercase;">To</div><div style="font-size:16px;font-weight:600;">Ålesund</div></div>
+          </div>
+          <div style="position:absolute;right:18px;top:50%;transform:translateY(-50%);width:38px;height:38px;border-radius:50%;background:#0A1822;border:1px solid #1C3743;display:flex;align-items:center;justify-content:center;color:#6F94A0;font-size:16px;">⇅</div>
+        </div>
+        <div>
+          <div style="display:flex;background:#0F2531;border-radius:14px;padding:4px;gap:4px;">
+            <div style="flex:1;text-align:center;padding:11px;border-radius:11px;color:#6F94A0;font-size:14px;font-weight:600;">Leave now</div>
+            <div style="flex:1;text-align:center;padding:11px;border-radius:11px;background:#F2B441;color:#0A1822;font-size:14px;font-weight:700;">Arrive by</div>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:baseline;padding:14px 6px 2px;">
+            <span style="color:#6F94A0;font-size:14px;">Arrive Ålesund by</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:700;">18:00</span>
+          </div>
+        </div>
+        <div style="background:#0F2531;border-radius:20px;padding:18px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <span style="font-size:14px;font-weight:600;">Ferry margin</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:18px;font-weight:700;color:#F2B441;">15 min</span>
+          </div>
+          <div style="display:flex;gap:8px;margin:14px 0 16px;">
+            <div style="flex:1;text-align:center;padding:9px;border-radius:10px;background:#0A1822;color:#6F94A0;font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:600;">5</div>
+            <div style="flex:1;text-align:center;padding:9px;border-radius:10px;background:#F2B441;color:#0A1822;font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;">15</div>
+            <div style="flex:1;text-align:center;padding:9px;border-radius:10px;background:#0A1822;color:#6F94A0;font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:600;">30</div>
+          </div>
+          <div style="position:relative;height:6px;background:#0A1822;border-radius:3px;">
+            <div style="position:absolute;left:0;top:0;height:6px;width:46%;background:#F2B441;border-radius:3px;"></div>
+            <div style="position:absolute;left:46%;top:50%;transform:translate(-50%,-50%);width:22px;height:22px;border-radius:50%;background:#EAF2F2;box-shadow:0 2px 8px rgba(0,0,0,.5);"></div>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;">
+          <div style="flex:1;text-align:center;padding:13px;border-radius:13px;background:#0F2531;border:1.5px solid #F2B441;font-size:13px;font-weight:700;">Fastest</div>
+          <div style="flex:1;text-align:center;padding:13px;border-radius:13px;background:#0F2531;border:1.5px solid #1C3743;font-size:13px;font-weight:600;color:#6F94A0;">Fewest ferries</div>
+        </div>
+      </div>
+      <div style="margin-top:auto;padding:14px 18px 22px;">
+        <div style="background:#F2B441;color:#0A1822;text-align:center;padding:17px;border-radius:18px;font-size:16px;font-weight:700;">Find route</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div style="position:absolute;left:416px;top:1010px;width:360px;font-family:'Space Grotesk',sans-serif;">
+  <div data-drags-parent="1" style="font-size:12px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:#5a626b;margin-bottom:8px;">B · Deep Fjord — Results</div>
+  <div style="width:360px;height:760px;border-radius:44px;background:#0A1822;box-shadow:0 34px 70px -22px rgba(0,0,0,.6),0 0 0 1px rgba(255,255,255,.05);padding:9px;">
+    <div style="width:100%;height:100%;border-radius:36px;overflow:hidden;background:#0A1822;display:flex;flex-direction:column;color:#EAF2F2;position:relative;">
+      <div style="position:relative;height:248px;background:radial-gradient(120% 90% at 70% 10%,#103040 0%,#0A1822 70%);overflow:hidden;flex:none;">
+        <div style="position:absolute;width:240px;height:160px;left:-40px;top:90px;background:#0E2E3A;filter:blur(28px);opacity:.8;border-radius:50%;"></div>
+        <div style="position:absolute;width:200px;height:130px;right:-30px;top:-20px;background:#0E2E3A;filter:blur(26px);opacity:.7;border-radius:50%;"></div>
+        <svg viewBox="0 0 360 240" style="position:absolute;inset:0;width:100%;height:100%;filter:drop-shadow(0 0 5px rgba(242,180,65,.35));">
+          <path d="M46,200 C 80,196 96,182 120,168" fill="none" stroke="#46C2B0" stroke-width="4" stroke-linecap="round"/>
+          <path d="M120,168 L168,150" fill="none" stroke="#F2B441" stroke-width="4" stroke-linecap="round" stroke-dasharray="2 9"/>
+          <path d="M168,150 C 196,142 210,132 232,118" fill="none" stroke="#46C2B0" stroke-width="4" stroke-linecap="round"/>
+          <path d="M232,118 L276,100" fill="none" stroke="#F2B441" stroke-width="4" stroke-linecap="round" stroke-dasharray="2 9"/>
+          <path d="M276,100 C 296,90 306,74 322,52" fill="none" stroke="#46C2B0" stroke-width="4" stroke-linecap="round"/>
+          <circle cx="46" cy="200" r="6" fill="#0A1822" stroke="#46C2B0" stroke-width="3"/>
+          <circle cx="322" cy="52" r="6.5" fill="#F2B441"/>
+          <rect x="138" y="153" width="11" height="11" rx="2" transform="rotate(45 144 159)" fill="#0A1822" stroke="#F2B441" stroke-width="2.5"/>
+          <rect x="248" y="103" width="11" height="11" rx="2" transform="rotate(45 254 109)" fill="#0A1822" stroke="#F2B441" stroke-width="2.5"/>
+        </svg>
+        <div style="position:absolute;left:16px;top:16px;width:40px;height:40px;border-radius:50%;background:rgba(10,24,34,.7);backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;font-size:18px;border:1px solid #1C3743;">‹</div>
+        <div style="position:absolute;right:16px;top:18px;padding:8px 13px;border-radius:30px;background:rgba(10,24,34,.7);backdrop-filter:blur(6px);font-size:12px;font-weight:600;border:1px solid #1C3743;">2 ferries</div>
+      </div>
+      <div style="flex:1;background:#0C202B;border-radius:26px 26px 0 0;margin-top:-22px;position:relative;padding:8px 20px 0;display:flex;flex-direction:column;overflow:hidden;">
+        <div style="width:38px;height:4px;border-radius:2px;background:#23414f;margin:8px auto 14px;"></div>
+        <div style="font-size:12px;color:#6F94A0;letter-spacing:.06em;text-transform:uppercase;">Leave by</div>
+        <div style="display:flex;align-items:baseline;gap:12px;">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:40px;font-weight:700;letter-spacing:-.02em;">13:05</div>
+          <div style="color:#6F94A0;font-size:13px;line-height:1.3;">arrive 17:42<br>4h 37m</div>
+        </div>
+        <div style="display:flex;gap:7px;margin:14px 0 12px;flex-wrap:wrap;">
+          <span style="padding:6px 12px;border-radius:30px;background:#0F2531;font-size:12px;font-weight:600;font-family:'JetBrains Mono',monospace;">198 km</span>
+          <span style="padding:6px 12px;border-radius:30px;background:#0F2531;font-size:12px;font-weight:600;">2 ferries</span>
+          <span style="padding:6px 12px;border-radius:30px;background:rgba(242,180,65,.14);color:#F2B441;font-size:12px;font-weight:600;">15 min margin</span>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:11px 14px;border-radius:14px;border:1px dashed #23414f;margin-bottom:6px;">
+          <span style="font-size:13px;color:#9bb6bd;">Inland · no ferries · <b style="color:#EAF2F2;font-family:'JetBrains Mono',monospace;">5h 28m</b></span>
+          <span style="color:#6F94A0;">→</span>
+        </div>
+        <div style="overflow:hidden;padding-top:8px;">
+          <div style="display:flex;gap:14px;">
+            <div style="display:flex;flex-direction:column;align-items:center;width:14px;flex:none;">
+              <div style="width:12px;height:12px;border-radius:50%;border:3px solid #46C2B0;"></div>
+              <div style="width:2px;flex:1;background:linear-gradient(#46C2B0,#F2B441);min-height:30px;"></div>
+            </div>
+            <div style="flex:1;padding-bottom:18px;">
+              <div style="font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:700;">13:05</div>
+              <div style="font-size:15px;font-weight:600;">Depart Bremanger</div>
+              <div style="font-size:12px;color:#6F94A0;">Drive 1h 18m · 76 km</div>
+            </div>
+          </div>
+          <div style="display:flex;gap:14px;">
+            <div style="display:flex;flex-direction:column;align-items:center;width:14px;flex:none;">
+              <div style="width:13px;height:13px;border-radius:3px;background:#F2B441;transform:rotate(45deg);"></div>
+              <div style="width:2px;flex:1;background:linear-gradient(#F2B441,#46C2B0);min-height:30px;"></div>
+            </div>
+            <div style="flex:1;padding-bottom:18px;">
+              <div style="font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:700;color:#F2B441;">14:39</div>
+              <div style="font-size:15px;font-weight:600;">Ferry · Anda–Lote</div>
+              <div style="font-size:12px;color:#6F94A0;">16 min buffer · crossing 20 min</div>
+            </div>
+          </div>
+          <div style="display:flex;gap:14px;">
+            <div style="display:flex;flex-direction:column;align-items:center;width:14px;flex:none;">
+              <div style="width:13px;height:13px;border-radius:3px;background:#F2B441;transform:rotate(45deg);"></div>
+              <div style="width:2px;flex:1;background:linear-gradient(#F2B441,#46C2B0);min-height:24px;"></div>
+            </div>
+            <div style="flex:1;padding-bottom:14px;">
+              <div style="font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:700;color:#F2B441;">16:56</div>
+              <div style="font-size:15px;font-weight:600;">Ferry · Festøya–Solavågen</div>
+              <div style="font-size:12px;color:#6F94A0;">18 min buffer · crossing 20 min</div>
+            </div>
+          </div>
+        </div>
+        <div style="margin-top:auto;display:flex;align-items:center;gap:12px;padding:14px 0 20px;">
+          <div style="flex:1;"><div style="font-family:'JetBrains Mono',monospace;font-size:20px;font-weight:700;">344 kr</div><div style="font-size:11px;color:#6F94A0;">Ferry 248 · Toll 96</div></div>
+          <div style="padding:15px 28px;border-radius:16px;background:#F2B441;color:#0A1822;font-size:15px;font-weight:700;">Start</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ DIRECTION C · BOLD MONO LIME ============ -->
+<div style="position:absolute;left:0px;top:1910px;width:360px;font-family:'Space Grotesk',sans-serif;">
+  <div data-drags-parent="1" style="font-size:12px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:#5a626b;margin-bottom:8px;">C · Bold Mono Lime — Planning</div>
+  <div style="width:360px;height:760px;border-radius:44px;background:#0C0D0C;box-shadow:0 34px 70px -22px rgba(0,0,0,.6),0 0 0 1px rgba(255,255,255,.05);padding:9px;">
+    <div class="fn-screen" style="width:100%;height:100%;border-radius:36px;overflow:hidden;background:#0C0D0C;display:flex;flex-direction:column;color:#F4F6F2;position:relative;">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 22px 6px;font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:600;">
+        <span>13:05</span><span style="letter-spacing:2px;color:#878C81;">●●●● ⌁ 84</span>
+      </div>
+      <div style="padding:8px 22px 0;"><div style="font-size:30px;font-weight:700;letter-spacing:-.02em;text-transform:uppercase;">Plan trip</div></div>
+      <div style="padding:16px 18px 0;display:flex;flex-direction:column;gap:14px;overflow:hidden;">
+        <div style="background:#171915;border-radius:6px;padding:4px 8px;position:relative;border:1px solid #262A23;">
+          <div style="display:flex;align-items:center;gap:14px;padding:14px 12px;border-bottom:1px solid #262A23;">
+            <div style="width:11px;height:11px;border-radius:50%;border:2.5px solid #C7F24A;flex:none;"></div>
+            <div style="flex:1;"><div style="font-size:11px;color:#878C81;letter-spacing:.1em;text-transform:uppercase;font-family:'JetBrains Mono',monospace;">From</div><div style="font-size:16px;font-weight:700;">Bremanger</div></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:14px;padding:14px 12px;">
+            <div style="width:11px;height:11px;background:#C7F24A;flex:none;"></div>
+            <div style="flex:1;"><div style="font-size:11px;color:#878C81;letter-spacing:.1em;text-transform:uppercase;font-family:'JetBrains Mono',monospace;">To</div><div style="font-size:16px;font-weight:700;">Ålesund</div></div>
+          </div>
+          <div style="position:absolute;right:16px;top:50%;transform:translateY(-50%);width:38px;height:38px;border-radius:6px;background:#0C0D0C;border:1px solid #262A23;display:flex;align-items:center;justify-content:center;color:#878C81;font-size:16px;">⇅</div>
+        </div>
+        <div>
+          <div style="display:flex;background:#171915;border-radius:8px;padding:4px;gap:4px;border:1px solid #262A23;">
+            <div style="flex:1;text-align:center;padding:11px;border-radius:5px;color:#878C81;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;">Leave now</div>
+            <div style="flex:1;text-align:center;padding:11px;border-radius:5px;background:#C7F24A;color:#0C0D0C;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;">Arrive by</div>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:baseline;padding:14px 6px 2px;">
+            <span style="color:#878C81;font-size:14px;">Arrive Ålesund by</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:24px;font-weight:700;">18:00</span>
+          </div>
+        </div>
+        <div style="background:#171915;border-radius:6px;padding:18px;border:1px solid #262A23;">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <span style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;">Ferry margin</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:20px;font-weight:700;color:#C7F24A;">15 min</span>
+          </div>
+          <div style="display:flex;gap:8px;margin:14px 0 16px;">
+            <div style="flex:1;text-align:center;padding:9px;border-radius:5px;background:#0C0D0C;border:1px solid #262A23;color:#878C81;font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:600;">5</div>
+            <div style="flex:1;text-align:center;padding:9px;border-radius:5px;background:#C7F24A;color:#0C0D0C;font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;">15</div>
+            <div style="flex:1;text-align:center;padding:9px;border-radius:5px;background:#0C0D0C;border:1px solid #262A23;color:#878C81;font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:600;">30</div>
+          </div>
+          <div style="position:relative;height:6px;background:#0C0D0C;border-radius:0;">
+            <div style="position:absolute;left:0;top:0;height:6px;width:46%;background:#C7F24A;"></div>
+            <div style="position:absolute;left:46%;top:50%;transform:translate(-50%,-50%);width:20px;height:20px;border-radius:4px;background:#F4F6F2;box-shadow:0 2px 8px rgba(0,0,0,.5);"></div>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;">
+          <div style="flex:1;text-align:center;padding:13px;border-radius:6px;background:#171915;border:1.5px solid #C7F24A;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;">Fastest</div>
+          <div style="flex:1;text-align:center;padding:13px;border-radius:6px;background:#171915;border:1.5px solid #262A23;font-size:12px;font-weight:700;color:#878C81;text-transform:uppercase;letter-spacing:.04em;">Fewest ferries</div>
+        </div>
+      </div>
+      <div style="margin-top:auto;padding:14px 18px 22px;">
+        <div style="background:#C7F24A;color:#0C0D0C;text-align:center;padding:18px;border-radius:8px;font-size:15px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;">Find route</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div style="position:absolute;left:416px;top:1910px;width:360px;font-family:'Space Grotesk',sans-serif;">
+  <div data-drags-parent="1" style="font-size:12px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:#5a626b;margin-bottom:8px;">C · Bold Mono Lime — Results</div>
+  <div style="width:360px;height:760px;border-radius:44px;background:#0C0D0C;box-shadow:0 34px 70px -22px rgba(0,0,0,.6),0 0 0 1px rgba(255,255,255,.05);padding:9px;">
+    <div style="width:100%;height:100%;border-radius:36px;overflow:hidden;background:#0C0D0C;display:flex;flex-direction:column;color:#F4F6F2;position:relative;">
+      <div style="position:relative;height:248px;background:radial-gradient(120% 90% at 70% 10%,#1a2014 0%,#0C0D0C 70%);overflow:hidden;flex:none;">
+        <div style="position:absolute;width:240px;height:160px;left:-40px;top:90px;background:#1A2014;filter:blur(26px);opacity:.9;border-radius:50%;"></div>
+        <svg viewBox="0 0 360 240" style="position:absolute;inset:0;width:100%;height:100%;filter:drop-shadow(0 0 5px rgba(199,242,74,.4));">
+          <path d="M46,200 C 80,196 96,182 120,168" fill="none" stroke="#C7F24A" stroke-width="4" stroke-linecap="round"/>
+          <path d="M120,168 L168,150" fill="none" stroke="#9BE36B" stroke-width="4" stroke-linecap="round" stroke-dasharray="2 9"/>
+          <path d="M168,150 C 196,142 210,132 232,118" fill="none" stroke="#C7F24A" stroke-width="4" stroke-linecap="round"/>
+          <path d="M232,118 L276,100" fill="none" stroke="#9BE36B" stroke-width="4" stroke-linecap="round" stroke-dasharray="2 9"/>
+          <path d="M276,100 C 296,90 306,74 322,52" fill="none" stroke="#C7F24A" stroke-width="4" stroke-linecap="round"/>
+          <circle cx="46" cy="200" r="6" fill="#0C0D0C" stroke="#C7F24A" stroke-width="3"/>
+          <rect x="316" y="46" width="13" height="13" fill="#C7F24A"/>
+          <rect x="139" y="154" width="10" height="10" transform="rotate(45 144 159)" fill="#0C0D0C" stroke="#9BE36B" stroke-width="2.5"/>
+          <rect x="249" y="104" width="10" height="10" transform="rotate(45 254 109)" fill="#0C0D0C" stroke="#9BE36B" stroke-width="2.5"/>
+        </svg>
+        <div style="position:absolute;left:16px;top:16px;width:40px;height:40px;border-radius:8px;background:rgba(12,13,12,.75);backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;font-size:18px;border:1px solid #262A23;">‹</div>
+        <div style="position:absolute;right:16px;top:18px;padding:8px 13px;border-radius:6px;background:rgba(12,13,12,.75);backdrop-filter:blur(6px);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;border:1px solid #262A23;">2 ferries</div>
+      </div>
+      <div style="flex:1;background:#101210;border-radius:18px 18px 0 0;margin-top:-18px;position:relative;padding:8px 20px 0;display:flex;flex-direction:column;overflow:hidden;border-top:1px solid #262A23;">
+        <div style="width:38px;height:4px;border-radius:2px;background:#2c302a;margin:8px auto 14px;"></div>
+        <div style="font-size:11px;color:#878C81;letter-spacing:.12em;text-transform:uppercase;font-family:'JetBrains Mono',monospace;">Leave by</div>
+        <div style="display:flex;align-items:baseline;gap:12px;">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:44px;font-weight:700;letter-spacing:-.03em;">13:05</div>
+          <div style="color:#878C81;font-size:13px;line-height:1.3;font-family:'JetBrains Mono',monospace;">arr 17:42<br>4h37m</div>
+        </div>
+        <div style="display:flex;gap:7px;margin:14px 0 12px;flex-wrap:wrap;">
+          <span style="padding:6px 12px;border-radius:5px;background:#171915;border:1px solid #262A23;font-size:12px;font-weight:600;font-family:'JetBrains Mono',monospace;">198 km</span>
+          <span style="padding:6px 12px;border-radius:5px;background:#171915;border:1px solid #262A23;font-size:12px;font-weight:600;">2 ferries</span>
+          <span style="padding:6px 12px;border-radius:5px;background:#C7F24A;color:#0C0D0C;font-size:12px;font-weight:700;">15 min margin</span>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:11px 14px;border-radius:6px;border:1px dashed #2c302a;margin-bottom:6px;">
+          <span style="font-size:13px;color:#a7ac9f;">Inland · no ferries · <b style="color:#F4F6F2;font-family:'JetBrains Mono',monospace;">5h 28m</b></span>
+          <span style="color:#878C81;">→</span>
+        </div>
+        <div style="overflow:hidden;padding-top:8px;">
+          <div style="display:flex;gap:14px;">
+            <div style="display:flex;flex-direction:column;align-items:center;width:14px;flex:none;">
+              <div style="width:12px;height:12px;border-radius:50%;border:3px solid #C7F24A;"></div>
+              <div style="width:2px;flex:1;background:linear-gradient(#C7F24A,#9BE36B);min-height:30px;"></div>
+            </div>
+            <div style="flex:1;padding-bottom:18px;">
+              <div style="font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:700;">13:05</div>
+              <div style="font-size:15px;font-weight:700;">Depart Bremanger</div>
+              <div style="font-size:12px;color:#878C81;font-family:'JetBrains Mono',monospace;">Drive 1h18m · 76 km</div>
+            </div>
+          </div>
+          <div style="display:flex;gap:14px;">
+            <div style="display:flex;flex-direction:column;align-items:center;width:14px;flex:none;">
+              <div style="width:12px;height:12px;background:#9BE36B;transform:rotate(45deg);"></div>
+              <div style="width:2px;flex:1;background:linear-gradient(#9BE36B,#C7F24A);min-height:30px;"></div>
+            </div>
+            <div style="flex:1;padding-bottom:18px;">
+              <div style="font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:700;color:#9BE36B;">14:39</div>
+              <div style="font-size:15px;font-weight:700;">Ferry · Anda–Lote</div>
+              <div style="font-size:12px;color:#878C81;font-family:'JetBrains Mono',monospace;">16 min buffer · 20 min</div>
+            </div>
+          </div>
+          <div style="display:flex;gap:14px;">
+            <div style="display:flex;flex-direction:column;align-items:center;width:14px;flex:none;">
+              <div style="width:12px;height:12px;background:#9BE36B;transform:rotate(45deg);"></div>
+              <div style="width:2px;flex:1;background:linear-gradient(#9BE36B,#C7F24A);min-height:24px;"></div>
+            </div>
+            <div style="flex:1;padding-bottom:14px;">
+              <div style="font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:700;color:#9BE36B;">16:56</div>
+              <div style="font-size:15px;font-weight:700;">Ferry · Festøya–Solavågen</div>
+              <div style="font-size:12px;color:#878C81;font-family:'JetBrains Mono',monospace;">18 min buffer · 20 min</div>
+            </div>
+          </div>
+        </div>
+        <div style="margin-top:auto;display:flex;align-items:center;gap:12px;padding:14px 0 20px;">
+          <div style="flex:1;"><div style="font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:700;">344 kr</div><div style="font-size:11px;color:#878C81;font-family:'JetBrains Mono',monospace;">Ferry 248 · Toll 96</div></div>
+          <div style="padding:16px 30px;border-radius:8px;background:#C7F24A;color:#0C0D0C;font-size:14px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;">Start</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>
