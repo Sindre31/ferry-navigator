@@ -657,9 +657,13 @@ function ResultsScreen({results,selIdx,result,mode,margin,shared,T,on}){
               step.hasSub2?h('div',{style:{fontSize:12,color:MUT,marginTop:1}},step.sub2):null,
               step.alert?h('div',{style:{fontSize:11,color:'#EDB93B',background:'rgba(237,185,59,.1)',border:'1px solid rgba(237,185,59,.3)',borderRadius:8,padding:'6px 9px',marginTop:6}},'⚠ '+step.alert):null,
               step.ferryIdx!=null?(()=>{
-                const Fx=R.ferries[step.ferryIdx],bd=R.boarded[step.ferryIdx];
-                const minT=(R.kaiArr||[])[step.ferryIdx]??bd;
+                // Options come from the base plan so earlier departures stay
+                // pickable after choosing a later one
+                const base=results[selIdx];
+                const Fx=base.ferries[step.ferryIdx],bd=R.boarded[step.ferryIdx];
+                const minT=(base.kaiArr||[])[step.ferryIdx]??bd;
                 const opts=Fx.dep.filter(d=>d>=minT).slice(0,4);
+                if(!opts.includes(bd)){opts.push(bd);opts.sort((a,b)=>a-b);}
                 return opts.length>1?h('div',{style:{display:'flex',gap:6,marginTop:7,flexWrap:'wrap'}},
                   opts.map(d=>h('div',{key:d,onClick:e=>{e.stopPropagation();on('pickDep',{ferryIdx:step.ferryIdx,dep:d});},
                     style:{padding:'5px 11px',borderRadius:9,fontFamily:"'JetBrains Mono',monospace",fontSize:12,fontWeight:700,cursor:'pointer',
