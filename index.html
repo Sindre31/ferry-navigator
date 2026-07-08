@@ -235,6 +235,34 @@ async function routeOSRM(points){
     if(routes.some(r=>dup(r,extra)))continue;
     routes.push(extra);
   }
+  // Detour probes: OSRM rarely proposes ferry-heavy parallel corridors
+  // (e.g. the coastal road vs. E39 inland) on its own. Route via points
+  // offset perpendicular to the main route on both sides; distinct,
+  // realistic results become alternatives too.
+  if(!hasVia&&routes[0]?.geometry?.coordinates?.length>2){
+    const g=routes[0].geometry.coordinates;
+    const mid=g[Math.floor(g.length/2)];
+    const a=points[0],b=points[points.length-1];
+    const cosL=Math.cos(mid[1]*Math.PI/180)||1;
+    let ux=(b.lon-a.lon)*cosL,uy=b.lat-a.lat;
+    const n=Math.hypot(ux,uy)||1;ux/=n;uy/=n;
+    const offDeg=Math.max(15,Math.min(45,routes[0].distance/1000*0.18))/111;
+    const side=s2=>({lon:mid[0]+s2*(-uy)*offDeg/cosL,lat:mid[1]+s2*ux*offDeg});
+    const detours=await Promise.all([
+      fetchOSRM([a,side(1),b],''),
+      fetchOSRM([a,side(-1),b],'')
+    ]);
+    // Looser dedupe here: a probe that snaps back to the main corridor
+    // differs by a few spur minutes but is not a real alternative
+    const dupLoose=(x)=>routes.some(r=>
+      Math.abs(r.duration-x.duration)<Math.max(600,best*0.08)&&
+      Math.abs(r.distance-x.distance)<Math.max(8000,routes[0].distance*0.08));
+    for(const arr of detours)for(const extra of arr){
+      if(extra.duration>best*1.75)continue;
+      if(dupLoose(extra))continue;
+      routes.push(extra);
+    }
+  }
   return routes.slice(0,5);
 }
 
@@ -503,7 +531,7 @@ function LangToggle({lang,on}){
 }
 
 // ── PlanScreen ─────────────────────────────────────────────────────────────
-function PlanScreen({from,to,via,fromText,toText,viaText,fromSugs,toSugs,viaSugs,showVia,date,mode,timeMin,margin,now,loading,error,recents,geoLoading,vehicle,T,lang,on}){
+function PlanScreen({from,to,via,fromText,toText,viaText,fromSugs,toSugs,viaSugs,showVia,date,mode,timeMin,margin,now,loading,error,recents,geoLoading,T,lang,on}){
   const p=v=>({bg:margin===v?ACC:'#0B0E11',fg:margin===v?'#04181A':MUT});
   const sugsStyle={marginTop:6,borderRadius:10,overflow:'hidden',border:'1px solid #222A33'};
   const sugItem=(s,i,cb)=>h('div',{key:i,onClick:cb,style:{padding:'10px 14px',cursor:'pointer',background:i%2?'#151b27':'#1a2030',fontSize:13,color:'#EDF1F5',display:'flex',gap:8,alignItems:'center'}},
@@ -599,15 +627,6 @@ function PlanScreen({from,to,via,fromText,toText,viaText,fromSugs,toSugs,viaSugs
             mode==='leave'&&h('div',{onClick:()=>on('timeNow'),style:{padding:'8px 13px',borderRadius:10,background:'#0B0E11',border:'1px solid #222A33',fontSize:12,fontWeight:700,cursor:'pointer',color:ACC}},T.nowBtn),
             h('input',{type:'time',value:fmt(timeMin),onChange:e=>on('timeSet',e.target.value),
               style:{background:'#0B0E11',color:'#EDF1F5',border:'1px solid #222A33',padding:'7px 12px',borderRadius:10,fontFamily:"'JetBrains Mono',monospace",fontSize:16,fontWeight:700,cursor:'pointer',outline:'none'}})
-          )
-        ),
-        h('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10}},
-          h('span',{style:{color:MUT,fontSize:13,flex:'none'}},T.veh),
-          h('div',{style:{display:'flex',gap:4,flexWrap:'wrap',justifyContent:'flex-end'}},
-            [['car','🚗',T.vehCar],['ev','⚡',T.vehEv],['mc','🏍',T.vehMc],['long','🚐',T.vehLong]].map(([k,ic,lb])=>
-              h('div',{key:k,onClick:()=>on('vehicle',k),
-                style:{padding:'7px 9px',borderRadius:10,fontSize:11,fontWeight:700,cursor:'pointer',whiteSpace:'nowrap',
-                  background:vehicle===k?ACC:'#0B0E11',color:vehicle===k?'#04181A':MUT}},ic+' '+lb))
           )
         )
       ),
@@ -1033,7 +1052,7 @@ function App(){
   }
 
   const inner=h('div',{style:{width:'100%',height:'100%',borderRadius:mobile?0:42,overflow:'hidden',background:'#0B0E11',position:'relative',color:'#EDF1F5',fontFamily:"'DM Sans',sans-serif"}},
-    screen==='plan'&&h(PlanScreen,{from,to,via,fromText,toText,viaText,fromSugs,toSugs,viaSugs,showVia,date,mode,timeMin,margin,now,loading,error,recents,geoLoading,vehicle,T,lang,on}),
+    screen==='plan'&&h(PlanScreen,{from,to,via,fromText,toText,viaText,fromSugs,toSugs,viaSugs,showVia,date,mode,timeMin,margin,now,loading,error,recents,geoLoading,T,lang,on}),
     screen==='results'&&result&&h(ResultsScreen,{results,selIdx,result,mode,margin,shared,vehicle,T,on}),
     screen==='timetable'&&result&&h(TimetableScreen,{result,selectedFerry,now,T,lang,on}),
     screen==='nextferry'&&h(NextFerryScreen,{T,lang,now,nfText,nfSugs,nfStop,nfDeps,nfLoading,on}),
