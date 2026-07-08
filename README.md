@@ -1,25 +1,53 @@
-# CODING AGENTS: READ THIS FIRST
+# ⛴ Ferry Navigator
 
-This is a **handoff bundle** from Claude Design (claude.ai/design).
+Norsk fergeplanlegger for bilturer. Skriv inn hvor du skal — appen finner ruten, oppdager alle fergekryssinger automatisk, henter sanntids fergetider og regner ut når du må dra hjemmefra for å rekke fergen.
 
-A user mocked up designs in HTML/CSS/JS using an AI design tool, then exported this bundle so a coding agent can implement the designs for real.
+**Live:** https://ferry-navigator.vercel.app *(deployes automatisk fra `main`)*
 
-## What you should do — IMPORTANT
+## Funksjoner
 
-**Read the chat transcripts first.** There are 1 chat transcript(s) in `chats/`. The transcripts show the full back-and-forth between the user and the design assistant — they tell you **what the user actually wants** and **where they landed** after iterating. Don't skip them. The final HTML files are the output, but the chat is where the intent lives.
+- **Alle ferger i Norge** — fergekryssinger oppdages automatisk fra rutedata (OpenStreetMap), ingen hardkodet sambandsliste
+- **Sanntids rutetider** fra Entur, inkludert driftsavvik og innstilte avganger
+- **Baklengs-planlegging** — «Ankomst kl. 18:00» gir seneste mulige avreise; «Avreise kl.» planlegger forover
+- **Rutealternativer** — ferge vs. kjøre rundt når begge er realistiske, som trykkbare kort og linjer på kartet
+- **Velg avgang** — de neste fergeavgangene vises som chips i tidslinjen; velg en annen og hele planen regnes om
+- **Rutetabell neste døgn** — fungerer over midnatt, morgendagens avganger merket «I MORGEN»
+- **Neste ferge** — søk opp en fergekai og se neste avganger med nedtelling, uten å planlegge rute
+- **Prisestimat** — AutoPASS-basert estimat per kryssing, justert for kjøretøytype (bil / el-bil / MC / over 6 m)
+- **Via-punkt**, **min posisjon** (GPS), **favoritter og nylige søk**, **delbare lenker** (hele ruten i URL-en)
+- **Installerbar PWA** — legg til på hjemskjerm, med offline-fallback via service worker
+- **Norsk og engelsk** UI (NO/EN-bryter, huskes)
 
-**Read `project/Ferry Navigator.dc.html` in full.** The user had this file open when they triggered the handoff, so it's almost certainly the primary design they want built. Read it top to bottom — don't skim. Then **follow its imports**: open every file it pulls in (shared components, CSS, scripts) so you understand how the pieces fit together before you start implementing.
+## Datakilder
 
-**If anything is ambiguous, ask the user to confirm before you start implementing.** It's much cheaper to clarify scope up front than to build the wrong thing.
+| Tjeneste | Brukes til |
+|---|---|
+| [Entur](https://developer.entur.org/) | Adressesøk (geocoder), fergetider, avvik og kanselleringer (journey-planner v3) |
+| [OSRM](http://project-osrm.org/) (demoserver) | Bilruting med fergedeteksjon (`mode: ferry` i OSM-data) |
+| [CartoDB](https://carto.com/) + [Leaflet](https://leafletjs.com/) | Mørke kartfliser og kartvisning |
 
-## About the design files
+Alle kall gjøres direkte fra nettleseren — ingen backend, ingen API-nøkler.
 
-The design medium is **HTML/CSS/JS** — these are prototypes, not production code. Your job is to **recreate them pixel-perfectly** in whatever technology makes sense for the target codebase (React, Vue, native, whatever fits). Match the visual output; don't copy the prototype's internal structure unless it happens to fit.
+> **Merk:** Fergeprisene er *estimater* beregnet fra kryssingens lengde (lineær tilpasning mot publiserte AutoPASS-takster) og merkes «estimat» i appen. OSRM-demoserveren har ingen oppetidsgaranti; ved jevn bruk bør rutingen flyttes til en betalt tjeneste eller egen OSRM-instans.
 
-**Don't render these files in a browser or take screenshots unless the user asks you to.** Everything you need — dimensions, colors, layout rules — is spelled out in the source. Read the HTML and CSS directly; a screenshot won't tell you anything they don't.
+## Teknisk
 
-## Bundle contents
+Hele appen er **én HTML-fil** (`index.html`): React 18 (UMD fra CDN, `React.createElement`, ingen byggesteg), Leaflet 1.9 og håndskrevet CSS. I tillegg:
 
-- `README.md` — this file
-- `chats/` — conversation transcripts (read these!)
-- `project/` — the `Ferry route navigator app` project files (HTML prototypes, assets, components)
+- `manifest.json` + `icons/` — PWA-manifest og app-ikoner
+- `sw.js` — service worker (network-first, offline-fallback)
+- `project/`, `chats/` — original designeksport fra Claude Design (historikk, brukes ikke av appen)
+
+### Kjøre lokalt
+
+Ingen avhengigheter eller byggesteg — server mappen statisk:
+
+```bash
+npx serve .          # eller: python3 -m http.server 8000
+```
+
+Åpne `http://localhost:8000`. API-ene (Entur/OSRM) er CORS-åpne og fungerer rett fra localhost.
+
+### Deploy
+
+Statisk site — pushes til `main` og Vercel deployer automatisk (ingen build command, output directory `.`).

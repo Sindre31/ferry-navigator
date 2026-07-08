@@ -70,6 +70,7 @@ no:{
   thenDrive:'deretter kjør',arriveT:'Ankomst',done:'Reise fullført',
   fareEst:'Fergetakst · estimat',
   errNoRoute:'Ingen rute funnet',errGeneric:'Noe gikk galt – prøv igjen',
+  veh:'Kjøretøy',vehCar:'Bil',vehEv:'El-bil',vehMc:'MC',vehLong:'Over 6 m',
   errPos:'Fikk ikke tilgang til posisjonen din',errPosSupport:'Posisjon støttes ikke i denne nettleseren',
   viaLabel:'via'
 },
@@ -94,6 +95,7 @@ en:{
   thenDrive:'then drive',arriveT:'Arrive',done:'Journey complete',
   fareEst:'Ferry fare · estimate',
   errNoRoute:'No route found',errGeneric:'Something went wrong – try again',
+  veh:'Vehicle',vehCar:'Car',vehEv:'EV',vehMc:'MC',vehLong:'Over 6 m',
   errPos:'Could not access your location',errPosSupport:'Geolocation is not supported in this browser',
   viaLabel:'via'
 }};
@@ -130,12 +132,13 @@ function nowMinutes(){
 
 function todayOslo(){return new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Oslo'}).format(new Date());}
 
-function buildShareUrl({from,to,via,date,mode,timeMin,margin}){
+function buildShareUrl({from,to,via,date,mode,timeMin,margin,vehicle}){
   const p=new URLSearchParams();
   p.set('fra',from.name);p.set('fra_p',from.lat.toFixed(5)+','+from.lon.toFixed(5));
   p.set('til',to.name);p.set('til_p',to.lat.toFixed(5)+','+to.lon.toFixed(5));
   if(via){p.set('via',via.name);p.set('via_p',via.lat.toFixed(5)+','+via.lon.toFixed(5));}
   p.set('dato',date);p.set('modus',mode);p.set('tid',String(timeMin));p.set('buffer',String(margin));
+  if(vehicle&&vehicle!=='car')p.set('kjt',vehicle);
   return location.origin+location.pathname+'?'+p.toString();
 }
 
@@ -158,6 +161,7 @@ function parseShareUrl(){
     date:/^\d{4}-\d{2}-\d{2}$/.test(q.get('dato')||'')?q.get('dato'):todayOslo(),
     mode:q.get('modus')==='leave'?'leave':'arrive',
     timeMin:Math.min(1410,Math.max(0,parseInt(q.get('tid'),10)||1080)),
+    vehicle:['ev','mc','long'].includes(q.get('kjt'))?q.get('kjt'):'car',
     margin:isNaN(mg)?DEF_MARGIN:Math.min(45,Math.max(0,mg))};
 }
 
@@ -267,8 +271,13 @@ async function getFerryDeps(stopId,dateStr){
 }
 
 // Estimated AutoPASS car fare from crossing length (linear fit against
-// published fares, e.g. Lavik–Oppedal ~5.6km→~172, Moss–Horten ~10km→~260)
-function ferryFare(km){return Math.max(80,Math.round(60+km*20));}
+// published fares, e.g. Lavik–Oppedal ~5.6km→~172, Moss–Horten ~10km→~260).
+// Vehicle multipliers approximate the fare-group ratios in the regulativ.
+const VEHICLES={car:1,ev:0.5,mc:0.5,long:1.8};
+function ferryFare(km,veh){
+  const mult=VEHICLES[veh]||1;
+  return Math.max(Math.round(80*mult),Math.round((60+km*20)*mult));
+}
 
 async function reverseAddress(lat,lon){
   try{
@@ -281,7 +290,7 @@ async function reverseAddress(lat,lon){
 // ── route planner ──────────────────────────────────────────────────────────
 function shortStop(n){return n?n.replace(/\s*(ferjekai|fergekai|ferjeleie|fergeleie|kai)\s*$/i,'').trim():null;}
 
-async function planOneRoute(osrmRoute,{from,to,via,date,timeMin,mode,margin,lang}){
+async function planOneRoute(osrmRoute,{from,to,via,date,timeMin,mode,margin,lang,vehicle}){
   const S=STR[lang]||STR.no;
   const allSteps=osrmRoute.legs.flatMap(l=>l.steps);
 
@@ -318,7 +327,7 @@ async function planOneRoute(osrmRoute,{from,to,via,date,timeMin,mode,margin,lang
     const a=shortStop(stopA?.name),b=shortStop(stopB?.name);
     const label=a&&b&&a!==b?a+' – '+b:(a||seg.osrmName||'Ferge');
     FERRIES.push({name:label,fromKai:stopA?.name,toKai:stopB?.name,stopId:stopA?.id,
-      crossingMin:seg.dur,fare:ferryFare(seg.km||0),
+      crossingMin:seg.dur,fare:ferryFare(seg.km||0,vehicle),
       dep:usable.length?usable:all.map(d=>d.t),allDeps:all,alerts,isLive});
   }
 
@@ -474,7 +483,7 @@ function LangToggle({lang,on}){
 }
 
 // ── PlanScreen ─────────────────────────────────────────────────────────────
-function PlanScreen({from,to,via,fromText,toText,viaText,fromSugs,toSugs,viaSugs,showVia,date,mode,timeMin,margin,now,loading,error,recents,geoLoading,T,lang,on}){
+function PlanScreen({from,to,via,fromText,toText,viaText,fromSugs,toSugs,viaSugs,showVia,date,mode,timeMin,margin,now,loading,error,recents,geoLoading,vehicle,T,lang,on}){
   const fillPct=Math.round(margin/45*100)+'%';
   const trackBg=`linear-gradient(to right,${ACC} ${fillPct},#0B0E11 ${fillPct})`;
   const p=v=>({bg:margin===v?ACC:'#0B0E11',fg:margin===v?'#04181A':MUT});
@@ -573,6 +582,15 @@ function PlanScreen({from,to,via,fromText,toText,viaText,fromSugs,toSugs,viaSugs
             h('div',{onClick:()=>on('timeMinus'),style:{width:32,height:32,borderRadius:'50%',background:'#0B0E11',display:'flex',alignItems:'center',justifyContent:'center',fontSize:18,cursor:'pointer'}},'−'),
             h('span',{style:{fontFamily:"'JetBrains Mono',monospace",fontSize:20,fontWeight:700,minWidth:56,textAlign:'center'}},fmt(timeMin)),
             h('div',{onClick:()=>on('timePlus'),style:{width:32,height:32,borderRadius:'50%',background:'#0B0E11',display:'flex',alignItems:'center',justifyContent:'center',fontSize:18,cursor:'pointer'}},'+')
+          )
+        ),
+        h('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10}},
+          h('span',{style:{color:MUT,fontSize:13,flex:'none'}},T.veh),
+          h('div',{style:{display:'flex',gap:4,flexWrap:'wrap',justifyContent:'flex-end'}},
+            [['car','🚗',T.vehCar],['ev','⚡',T.vehEv],['mc','🏍',T.vehMc],['long','🚐',T.vehLong]].map(([k,ic,lb])=>
+              h('div',{key:k,onClick:()=>on('vehicle',k),
+                style:{padding:'7px 9px',borderRadius:10,fontSize:11,fontWeight:700,cursor:'pointer',whiteSpace:'nowrap',
+                  background:vehicle===k?ACC:'#0B0E11',color:vehicle===k?'#04181A':MUT}},ic+' '+lb))
           )
         )
       ),
@@ -812,6 +830,7 @@ function App(){
   const [recents,setRecents]=useState(loadRecents);
   const [geoLoading,setGeoLoading]=useState(false);
   const [lang,setLang]=useState(()=>{try{return localStorage.getItem('fn_lang')==='en'?'en':'no';}catch(e){return 'no';}});
+  const [vehicle,setVehicle]=useState(()=>{try{const v=localStorage.getItem('fn_vehicle');return VEHICLES[v]?v:'car';}catch(e){return 'car';}});
   const [anchors,setAnchors]=useState({});
   const [nfText,setNfText]=useState('');
   const [nfSugs,setNfSugs]=useState([]);
@@ -847,9 +866,9 @@ function App(){
     if(!s)return;
     setFrom(s.from);setTo(s.to);setFromText(s.from.name);setToText(s.to.name);
     if(s.via){setVia(s.via);setViaText(s.via.name);setShowVia(true);}
-    setDate(s.date);setMode(s.mode);setTimeMin(s.timeMin);setMargin(s.margin);
+    setDate(s.date);setMode(s.mode);setTimeMin(s.timeMin);setMargin(s.margin);setVehicle(s.vehicle);
     setLoading(true);
-    planAlternatives({from:s.from,to:s.to,via:s.via,date:s.date,timeMin:s.timeMin,mode:s.mode,margin:s.margin,lang:localStorage.getItem('fn_lang')==='en'?'en':'no'})
+    planAlternatives({from:s.from,to:s.to,via:s.via,date:s.date,timeMin:s.timeMin,mode:s.mode,margin:s.margin,vehicle:s.vehicle,lang:localStorage.getItem('fn_lang')==='en'?'en':'no'})
       .then(r=>{setResults(r);setSelIdx(0);setScreen('results');})
       .catch(e=>setError(e.message==='NOROUTE'?STR.no.errNoRoute:STR.no.errGeneric))
       .finally(()=>setLoading(false));
@@ -899,7 +918,7 @@ function App(){
 
   function runPlan(f,t,v){
     setLoading(true);setError(null);
-    planAlternatives({from:f,to:t,via:v||null,date,timeMin,mode,margin,lang})
+    planAlternatives({from:f,to:t,via:v||null,date,timeMin,mode,margin,lang,vehicle})
       .then(r=>{setResults(r);setSelIdx(0);setSelectedFerry(0);setAnchors({});
         setScreen('results');addRecent(f,t,v);})
       .catch(e=>setError(e.message==='NOROUTE'?T.errNoRoute:T.errGeneric))
@@ -955,7 +974,7 @@ function App(){
       case 'selAlt': setSelIdx(data);setSelectedFerry(0);break;
       case 'share':{
         if(!result)break;
-        const url=buildShareUrl({from:result.from,to:result.to,via:result.viaPoint,date,mode,timeMin,margin});
+        const url=buildShareUrl({from:result.from,to:result.to,via:result.viaPoint,date,mode,timeMin,margin,vehicle});
         const done=()=>{setShared(true);setTimeout(()=>setShared(false),2200);};
         if(navigator.share){
           navigator.share({title:'Ferry Navigator',text:result.from.name+' → '+result.to.name,url}).then(done).catch(()=>{});
@@ -964,6 +983,7 @@ function App(){
         }
         break;}
       case 'lang':{setLang(data);try{localStorage.setItem('fn_lang',data);}catch(e){}break;}
+      case 'vehicle':{setVehicle(data);try{localStorage.setItem('fn_vehicle',data);}catch(e){}break;}
       case 'pickDep': setAnchors(a=>({...a,[selIdx]:data}));break;
       case 'nfText': setNfText(data);setNfStop(null);break;
       case 'nfSelect':{
@@ -983,7 +1003,7 @@ function App(){
   }
 
   const inner=h('div',{style:{width:'100%',height:'100%',borderRadius:mobile?0:42,overflow:'hidden',background:'#0B0E11',position:'relative',color:'#EDF1F5',fontFamily:"'DM Sans',sans-serif"}},
-    screen==='plan'&&h(PlanScreen,{from,to,via,fromText,toText,viaText,fromSugs,toSugs,viaSugs,showVia,date,mode,timeMin,margin,now,loading,error,recents,geoLoading,T,lang,on}),
+    screen==='plan'&&h(PlanScreen,{from,to,via,fromText,toText,viaText,fromSugs,toSugs,viaSugs,showVia,date,mode,timeMin,margin,now,loading,error,recents,geoLoading,vehicle,T,lang,on}),
     screen==='results'&&result&&h(ResultsScreen,{results,selIdx,result,mode,margin,shared,T,on}),
     screen==='timetable'&&result&&h(TimetableScreen,{result,selectedFerry,now,T,lang,on}),
     screen==='nextferry'&&h(NextFerryScreen,{T,lang,now,nfText,nfSugs,nfStop,nfDeps,nfLoading,on}),
