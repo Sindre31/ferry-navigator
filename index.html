@@ -67,7 +67,7 @@ no:{
   noDeps:'Ingen avganger i dette tidsrommet',liveData:'LIVE RUTEDATA',
   tabPlan:'Plan',tabRoute:'Rute',tabTimes:'Tider',tabNext:'Neste',
   nextTitle:'Neste ferge',quayPH:'Søk fergekai…',inMin:m=>'om '+m+' min',
-  depart:'Avreise',drive:'Kjør',ferryW:'Ferge',minBuffer:'min buffer',minCrossing:'min kryssing',
+  depart:'Avreise',drive:'Kjør',ferryW:'Ferge',minBuffer:'min buffer',minCrossing:'min kryssing',quayArr:'Ved kai ca.',
   thenDrive:'deretter kjør',arriveT:'Ankomst',done:'Reise fullført',
   fareEst:'Fergetakst · estimat',
   errNoRoute:'Ingen rute funnet',errGeneric:'Noe gikk galt – prøv igjen',
@@ -92,7 +92,7 @@ en:{
   noDeps:'No departures in this period',liveData:'LIVE SCHEDULE',
   tabPlan:'Plan',tabRoute:'Route',tabTimes:'Times',tabNext:'Next',
   nextTitle:'Next ferry',quayPH:'Search ferry quay…',inMin:m=>'in '+m+' min',
-  depart:'Depart',drive:'Drive',ferryW:'Ferry',minBuffer:'min buffer',minCrossing:'min crossing',
+  depart:'Depart',drive:'Drive',ferryW:'Ferry',minBuffer:'min buffer',minCrossing:'min crossing',quayArr:'At quay ~',
   thenDrive:'then drive',arriveT:'Arrive',done:'Journey complete',
   fareEst:'Ferry fare · estimate',
   errNoRoute:'No route found',errGeneric:'Something went wrong – try again',
@@ -146,7 +146,7 @@ function buildShareUrl({from,to,via,date,mode,timeMin,margin,vehicle}){
 function loadRecents(){try{const r=JSON.parse(localStorage.getItem('fn_recents')||'[]');return Array.isArray(r)?r.filter(x=>x.fav):[];}catch(e){return[];}}
 // Only favorites survive a reload; plain recents live for the session
 function saveRecents(r){try{localStorage.setItem('fn_recents',JSON.stringify(r.filter(x=>x.fav)));}catch(e){}}
-function recentKey(r){return r.from.name+'|'+r.to.name+'|'+(r.via?.name||'');}
+function recentKey(r){return r.from.name+'|'+r.to.name;}
 
 function parseShareUrl(){
   const q=new URLSearchParams(location.search);
@@ -243,23 +243,30 @@ async function routeOSRM(points){
     const g=routes[0].geometry.coordinates;
     const a=points[0],b=points[points.length-1];
     const offDeg=Math.max(15,Math.min(50,routes[0].distance/1000*0.18))/111;
-    const probeReqs=[];
-    for(const frac of[0.25,0.5,0.75]){
+    const offPt=(frac,s2)=>{
       const mid=g[Math.min(g.length-1,Math.floor(g.length*frac))];
       const cosL=Math.cos(mid[1]*Math.PI/180)||1;
       let ux=(b.lon-a.lon)*cosL,uy=b.lat-a.lat;
       const n=Math.hypot(ux,uy)||1;ux/=n;uy/=n;
-      for(const s2 of[1,-1])
-        probeReqs.push(fetchOSRM([a,{lon:mid[0]+s2*(-uy)*offDeg/cosL,lat:mid[1]+s2*ux*offDeg},b],''));
-    }
+      return{lon:mid[0]+s2*(-uy)*offDeg/cosL,lat:mid[1]+s2*ux*offDeg};
+    };
+    const probeReqs=[];
+    for(const frac of[0.25,0.5,0.75])for(const s2 of[1,-1])
+      probeReqs.push(fetchOSRM([a,offPt(frac,s2),b],''));
+    // Corridor probes: TWO via points on the same side pin the whole
+    // route to the parallel corridor — with a single point the router
+    // sneaks back to the main road between the ferries
+    for(const s2 of[1,-1])
+      probeReqs.push(fetchOSRM([a,offPt(0.3,s2),offPt(0.65,s2),b],''));
     const detours=await Promise.all(probeReqs);
     // Looser dedupe here: a probe that snaps back to the main corridor
     // differs by a few spur minutes but is not a real alternative
     const dupLoose=(x)=>routes.some(r=>
       Math.abs(r.duration-x.duration)<Math.max(600,best*0.08)&&
       Math.abs(r.distance-x.distance)<Math.max(8000,routes[0].distance*0.08));
-    for(const arr of detours)for(const extra of arr){
-      if(extra.duration>best*1.75)continue;
+    // Fastest realistic detours claim the remaining slots
+    const cands=detours.flat().filter(x=>x.duration<=best*1.75).sort((x,y)=>x.duration-y.duration);
+    for(const extra of cands){
       if(dupLoose(extra))continue;
       routes.push(extra);
     }
@@ -394,7 +401,7 @@ async function planOneRoute(osrmRoute,{from,to,via,date,timeMin,mode,margin,lang
     boarded.push(dep);
     const nd=DRIVES[i+1];
     steps.push({type:'ferry',time:dep,timeColor:'#37C2F0',title:S.ferryW+' · '+F.name,
-      sub:buf+' '+S.minBuffer+' · '+F.crossingMin+' '+S.minCrossing,
+      sub:S.quayArr+' '+fmt(t)+' · '+buf+' '+S.minBuffer+' · '+F.crossingMin+' '+S.minCrossing,
       sub2:nd?.dur?S.thenDrive+' '+durFmt(nd.dur)+' · '+nd.km+' km':'',
       hasSub2:!!(nd?.dur),notLast:true,ferryIdx:i,alert:F.alerts[0]||null});
     t=dep+F.crossingMin+(nd?.dur||0);
@@ -454,7 +461,7 @@ function rescheduleResult(R,anchor,margin,S){
     const dep=boarded[i],buf=dep-tc,nd=D[i+1];
     kaiArr.push(tc);
     steps.push({type:'ferry',time:dep,timeColor:'#37C2F0',title:S.ferryW+' · '+F[i].name,
-      sub:buf+' '+S.minBuffer+' · '+F[i].crossingMin+' '+S.minCrossing,
+      sub:S.quayArr+' '+fmt(tc)+' · '+buf+' '+S.minBuffer+' · '+F[i].crossingMin+' '+S.minCrossing,
       sub2:nd?.dur?S.thenDrive+' '+durFmt(nd.dur)+' · '+nd.km+' km':'',
       hasSub2:!!(nd?.dur),notLast:true,ferryIdx:i,alert:F[i].alerts[0]||null});
     tc=dep+F[i].crossingMin+(nd?.dur||0);
@@ -605,8 +612,7 @@ function PlanScreen({from,to,via,fromText,toText,viaText,fromSugs,toSugs,viaSugs
           h('div',{onClick:e=>{e.stopPropagation();on('toggleFav',r);},
             style:{fontSize:17,color:r.fav?'#EDB93B':'#3a444f',flex:'none',width:26,textAlign:'center',lineHeight:1}},r.fav?'★':'☆'),
           h('div',{style:{flex:1,minWidth:0}},
-            h('div',{style:{fontSize:13,fontWeight:600,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}},shortName(r.from.name)+' → '+shortName(r.to.name)),
-            r.via?h('div',{style:{fontSize:11,color:MUT}},T.viaLabel+' '+shortName(r.via.name)):null
+            h('div',{style:{fontSize:13,fontWeight:600,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}},shortName(r.from.name)+' → '+shortName(r.to.name))
           ),
           h('div',{style:{color:MUT,fontSize:15,flex:'none'}},'›')
         ))
@@ -887,8 +893,8 @@ function App(){
   const [nfLoading,setNfLoading]=useState(false);
   const T=STR[lang];
   const [date,setDate]=useState(todayOslo);
-  const [mode,setMode]=useState('arrive');
-  const [timeMin,setTimeMin]=useState(1080);
+  const [mode,setMode]=useState('leave');
+  const [timeMin,setTimeMin]=useState(()=>Math.min(1410,Math.ceil(nowMinutes()/5)*5));
   const [margin,setMargin]=useState(DEF_MARGIN);
   const [results,setResults]=useState(null);
   const [selIdx,setSelIdx]=useState(0);
@@ -950,9 +956,9 @@ function App(){
   const anchor=anchors[selIdx]||null;
   const result=baseResult&&anchor?rescheduleResult(baseResult,anchor,margin,STR[lang]):baseResult;
 
-  function addRecent(f,t,v){
+  function addRecent(f,t){
     setRecents(prev=>{
-      const item={from:f,to:t,via:v||null,fav:false,ts:Date.now()};
+      const item={from:f,to:t,fav:false,ts:Date.now()};
       const k=recentKey(item);
       const old=prev.find(r=>recentKey(r)===k);
       if(old)item.fav=old.fav;
@@ -968,7 +974,7 @@ function App(){
     setLoading(true);setError(null);
     planAlternatives({from:f,to:t,via:v||null,date,timeMin,mode,margin,lang,vehicle})
       .then(r=>{setResults(r);setSelIdx(0);setSelectedFerry(0);setAnchors({});
-        setScreen('results');addRecent(f,t,v);})
+        setScreen('results');addRecent(f,t);})
       .catch(e=>setError(e.message==='NOROUTE'?T.errNoRoute:T.errGeneric))
       .finally(()=>setLoading(false));
   }
@@ -996,9 +1002,8 @@ function App(){
       case 'recent':{
         setFrom(data.from);setFromText(data.from.name);
         setTo(data.to);setToText(data.to.name);
-        if(data.via){setVia(data.via);setViaText(data.via.name);setShowVia(true);}
-        else{setVia(null);setViaText('');setShowVia(false);}
-        runPlan(data.from,data.to,data.via||null);
+        setVia(null);setViaText('');setShowVia(false);
+        runPlan(data.from,data.to,null);
         break;}
       case 'toggleFav':{
         setRecents(prev=>{
