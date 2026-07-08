@@ -547,9 +547,11 @@ async function planAlternatives(opts){
   const settled=await Promise.allSettled(routes.map(rt=>planOneRoute(rt,opts)));
   const out=settled.filter(s=>s.status==='fulfilled').map(s=>s.value);
   if(!out.length)throw new Error('NOROUTE');
-  // Best real-world option first: latest departure (arrive-by) or earliest arrival
-  out.sort((a,b)=>opts.mode==='arrive'?b.leaveBy-a.leaveBy:a.arrive-b.arrive);
-  return out;
+  // Fastest real-world option first (incl. ferry waiting); drop routes
+  // that take far longer than the best — not real choices
+  out.sort((a,b)=>a.total-b.total);
+  const bestTotal=out[0].total;
+  return out.filter(r=>r.total<=bestTotal*1.4);
 }
 
 // Re-anchor the whole schedule on one explicitly chosen ferry departure:
@@ -621,15 +623,25 @@ function MapView({results,selIdx,from,to,onSelect}){
       const pl=L.polyline(sel.osrmRoute.geometry.coordinates.map(c=>[c[1],c[0]]),{color:ACC,weight:4,opacity:.9}).addTo(map);
       bounds.extend(pl.getBounds());
     }
-    // Time badge per alternative at the route's midpoint — tap to select
+    // Time badge per alternative — tap to select. Badges slide along their
+    // route until they stop overlapping each other.
+    const span=(typeof bounds.getNorth==='function'&&bounds.isValid())
+      ?Math.hypot(bounds.getNorth()-bounds.getSouth(),bounds.getEast()-bounds.getWest()):1;
+    const placedBadges=[];
     results.forEach((R,i)=>{
       const g=R.osrmRoute?.geometry?.coordinates;
       if(!g?.length)return;
-      const mid=g[Math.floor(g.length/2)];
+      let pt=null;
+      for(const f of[0.5,0.42,0.58,0.34,0.66,0.26,0.74,0.18,0.82]){
+        const c=g[Math.min(g.length-1,Math.floor(g.length*f))];
+        if(placedBadges.every(p=>Math.hypot(p[0]-c[1],p[1]-c[0])>span*0.09)){pt=c;break;}
+      }
+      if(!pt)pt=g[Math.floor(g.length/2)];
+      placedBadges.push([pt[1],pt[0]]);
       const seld=i===selIdx;
       const icon=L.divIcon({className:'',iconSize:null,iconAnchor:[26,13],
         html:`<div style="padding:4px 10px;border-radius:20px;font:700 11px 'JetBrains Mono',monospace;white-space:nowrap;background:${seld?'#2BD9D0':'rgba(22,27,34,.95)'};color:${seld?'#04181A':'#EDF1F5'};border:1px solid ${seld?'#2BD9D0':'#3a444f'};box-shadow:0 2px 8px rgba(0,0,0,.5);">${durFmt(R.total)}${R.numFerries?' ⛴':''}</div>`});
-      const lm=L.marker([mid[1],mid[0]],{icon}).addTo(map);
+      const lm=L.marker([pt[1],pt[0]],{icon}).addTo(map);
       lm.on('click',()=>onSelect(i));
     });
     const mk=(fill,border)=>L.divIcon({html:`<div style="width:13px;height:13px;border-radius:50%;background:${fill};border:3px solid ${border};box-sizing:border-box;"></div>`,className:'',iconSize:[13,13],iconAnchor:[6,6]});
@@ -781,8 +793,10 @@ function PlanScreen({from,to,via,fromText,toText,viaText,fromSugs,toSugs,viaSugs
 }
 
 // ── ResultsScreen ──────────────────────────────────────────────────────────
-function ResultsScreen({results,selIdx,result,mode,margin,shared,vehicle,T,on}){
+function ResultsScreen({results,selIdx,result,mode,margin,timeMin,shared,vehicle,T,on}){
   const R=result||results[selIdx];
+  // Arrive-by mode: arriving later than requested is flagged in red
+  const late=mode==='arrive'&&R.arrive>timeMin;
   const [vehOpen,setVehOpen]=useState(false);
   // Fare recomputed live from the chosen vehicle type
   const cost=R.ferries.reduce((s,f)=>s+(f.km!=null?ferryFare(f.km,vehicle):f.fare),0);
@@ -817,7 +831,9 @@ function ResultsScreen({results,selIdx,result,mode,margin,shared,vehicle,T,on}){
       h('div',{style:{fontSize:12,color:MUT,letterSpacing:'.06em',textTransform:'uppercase'}},mode==='arrive'?T.latestDep:T.plainDep),
       h('div',{style:{display:'flex',alignItems:'baseline',gap:14}},
         h('div',{style:{fontFamily:"'JetBrains Mono',monospace",fontSize:46,fontWeight:700,letterSpacing:'-.02em',color:ACC}},fmt(R.leaveBy)),
-        h('div',{style:{color:MUT,fontSize:13,lineHeight:1.35}},T.arrivalWord+' '+fmt(R.arrive)+(R.arrive>=1440?T.plusDay:''),h('br'),durFmt(R.total))
+        h('div',{style:{color:MUT,fontSize:13,lineHeight:1.35}},
+          h('span',{style:late?{color:'#FF6B6B',fontWeight:700}:undefined},T.arrivalWord+' '+fmt(R.arrive)+(R.arrive>=1440?T.plusDay:'')),
+          h('br'),durFmt(R.total))
       ),
       h('div',{style:{display:'flex',gap:7,margin:'12px 0 10px',flexWrap:'wrap'}},
         h('span',{style:{padding:'6px 12px',borderRadius:30,background:PANEL,fontSize:12,fontWeight:600,fontFamily:"'JetBrains Mono',monospace"}},R.distance+' km'),
@@ -835,7 +851,7 @@ function ResultsScreen({results,selIdx,result,mode,margin,shared,vehicle,T,on}){
           ),
           h('div',{style:{flex:1,paddingBottom:18}},
             h('div',{onClick:step.ferryIdx!=null?()=>on('openTT',step.ferryIdx):undefined,style:{cursor:step.ferryIdx!=null?'pointer':'default'}},
-              h('div',{style:{fontFamily:"'JetBrains Mono',monospace",fontSize:15,fontWeight:700,color:step.timeColor}},fmt(step.time)+(step.time>=1440?' +1':'')),
+              h('div',{style:{fontFamily:"'JetBrains Mono',monospace",fontSize:15,fontWeight:700,color:(step.type==='arrive'&&late)?'#FF6B6B':step.timeColor}},fmt(step.time)+(step.time>=1440?' +1':'')),
               h('div',{style:{fontSize:15,fontWeight:600,fontFamily:"'Space Grotesk',sans-serif"}},step.title),
               h('div',{style:{fontSize:12,color:MUT}},step.sub),
               step.hasSub2?h('div',{style:{fontSize:12,color:MUT,marginTop:1}},step.sub2):null,
@@ -1124,7 +1140,6 @@ function App(){
         setFrom(data.from);setFromText(data.from.name);
         setTo(data.to);setToText(data.to.name);
         setVia(null);setViaText('');setShowVia(false);
-        runPlan(data.from,data.to,null);
         break;}
       case 'toggleFav':{
         setRecents(prev=>{
@@ -1180,7 +1195,7 @@ function App(){
 
   const inner=h('div',{style:{width:'100%',height:'100%',borderRadius:mobile?0:42,overflow:'hidden',background:'#0B0E11',position:'relative',color:'#EDF1F5',fontFamily:"'DM Sans',sans-serif"}},
     screen==='plan'&&h(PlanScreen,{from,to,via,fromText,toText,viaText,fromSugs,toSugs,viaSugs,showVia,date,mode,timeMin,margin,now,loading,error,recents,geoLoading,T,lang,on}),
-    screen==='results'&&result&&h(ResultsScreen,{results,selIdx,result,mode,margin,shared,vehicle,T,on}),
+    screen==='results'&&result&&h(ResultsScreen,{results,selIdx,result,mode,margin,timeMin,shared,vehicle,T,on}),
     screen==='timetable'&&result&&h(TimetableScreen,{result,selectedFerry,now,T,lang,on}),
     screen==='nextferry'&&h(NextFerryScreen,{T,lang,now,nfText,nfSugs,nfStop,nfDeps,nfLoading,on}),
     h(TabBar,{screen,hasResult:!!result,T,on})
