@@ -202,6 +202,27 @@ async function searchQuays(text){
   )).map(f=>({name:f.properties.label||f.properties.name,id:f.properties.id,lat:f.geometry.coordinates[1],lon:f.geometry.coordinates[0]}));
 }
 
+// Ferry quays in the bounding box between the endpoints (Entur geocoder)
+async function ferryQuaysInBox(a,b){
+  try{
+    const minLat=Math.min(a.lat,b.lat)-0.15,maxLat=Math.max(a.lat,b.lat)+0.15;
+    const minLon=Math.min(a.lon,b.lon)-0.3,maxLon=Math.max(a.lon,b.lon)+0.3;
+    const box=`&boundary.rect.min_lat=${minLat}&boundary.rect.max_lat=${maxLat}&boundary.rect.min_lon=${minLon}&boundary.rect.max_lon=${maxLon}`;
+    const seen=new Set(),out=[];
+    // both spellings: "ferjekai" (nynorsk regions) and "fergekai" (bokmål)
+    for(const word of['ferjekai','fergekai']){
+      const r=await fetchRetry(`https://api.entur.io/geocoder/v1/autocomplete?text=${word}&size=40&layers=venue`+box,{headers:{'ET-Client-Name':'ferrynav-app'}});
+      const d=await r.json();
+      for(const f of(d.features||[])){
+        if(!f.properties.id?.startsWith('NSR:')||seen.has(f.properties.id))continue;
+        seen.add(f.properties.id);
+        out.push({name:f.properties.name,lat:f.geometry.coordinates[1],lon:f.geometry.coordinates[0]});
+      }
+    }
+    return out;
+  }catch(e){return[];}
+}
+
 async function fetchOSRM(points,params){
   try{
     const cs=points.map(p=>p.lon+','+p.lat).join(';');
@@ -235,38 +256,39 @@ async function routeOSRM(points){
     if(routes.some(r=>dup(r,extra)))continue;
     routes.push(extra);
   }
-  // Detour probes: OSRM rarely proposes ferry-heavy parallel corridors
-  // (e.g. the coastal road vs. E39 inland) on its own. Route via points
-  // offset perpendicular to the main route on both sides; distinct,
-  // realistic results become alternatives too.
+  // Quay-aware detour probing: OSRM rarely proposes ferry-heavy parallel
+  // corridors on its own. Find real ferry quays between the endpoints that
+  // lie well off the main route, and probe explicit routes via them —
+  // e.g. Koparnes forces the coastal Rv61 corridor from Ålesund.
   if(!hasVia&&routes[0]?.geometry?.coordinates?.length>2){
-    const g=routes[0].geometry.coordinates;
     const a=points[0],b=points[points.length-1];
-    const offDeg=Math.max(15,Math.min(50,routes[0].distance/1000*0.18))/111;
-    const offPt=(frac,s2)=>{
-      const mid=g[Math.min(g.length-1,Math.floor(g.length*frac))];
-      const cosL=Math.cos(mid[1]*Math.PI/180)||1;
-      let ux=(b.lon-a.lon)*cosL,uy=b.lat-a.lat;
-      const n=Math.hypot(ux,uy)||1;ux/=n;uy/=n;
-      return{lon:mid[0]+s2*(-uy)*offDeg/cosL,lat:mid[1]+s2*ux*offDeg};
-    };
-    const probeReqs=[];
-    for(const frac of[0.25,0.5,0.75])for(const s2 of[1,-1])
-      probeReqs.push(fetchOSRM([a,offPt(frac,s2),b],''));
-    // Corridor probes: TWO via points on the same side pin the whole
-    // route to the parallel corridor — with a single point the router
-    // sneaks back to the main road between the ferries
-    for(const s2 of[1,-1])
-      probeReqs.push(fetchOSRM([a,offPt(0.3,s2),offPt(0.65,s2),b],''));
-    const detours=await Promise.all(probeReqs);
-    // Looser dedupe here: a probe that snaps back to the main corridor
-    // differs by a few spur minutes but is not a real alternative
-    const dupLoose=(x)=>routes.some(r=>
+    const g=routes[0].geometry.coordinates;
+    const step=Math.max(1,Math.floor(g.length/60));
+    const sample=[];for(let i=0;i<g.length;i+=step)sample.push(g[i]);
+    const deg=(p,q)=>{const dx=(p[0]-q.lon)*Math.cos(q.lat*Math.PI/180),dy=p[1]-q.lat;return Math.hypot(dx,dy);};
+    const distToRoute=q=>Math.min(...sample.map(c=>deg(c,q)));
+    const dAB=deg([a.lon,a.lat],b)||1e-6;
+    const quays=await ferryQuaysInBox(a,b);
+    const cands=quays
+      .map(q=>({q,off:distToRoute(q),detour:(deg([a.lon,a.lat],q)+deg([b.lon,b.lat],q))/dAB}))
+      .filter(x=>x.off>8/111)      // well off the main route
+      .filter(x=>x.detour<1.5)     // still plausibly "between" the endpoints
+      .sort((x,y)=>x.detour-y.detour);
+    // one probe per area: skip quays within ~12 km of an already chosen one
+    const picked=[];
+    for(const c of cands){
+      if(picked.some(p=>deg([p.q.lon,p.q.lat],c.q)<12/111))continue;
+      picked.push(c);
+      if(picked.length>=4)break;
+    }
+    const detours=await Promise.all(picked.map(c=>fetchOSRM([a,c.q,b],'')));
+    // Looser dedupe: a probe that snaps back to the main corridor differs
+    // by a few spur minutes but is not a real alternative
+    const dupLoose=x=>routes.some(r=>
       Math.abs(r.duration-x.duration)<Math.max(600,best*0.08)&&
       Math.abs(r.distance-x.distance)<Math.max(8000,routes[0].distance*0.08));
-    // Fastest realistic detours claim the remaining slots
-    const cands=detours.flat().filter(x=>x.duration<=best*1.75).sort((x,y)=>x.duration-y.duration);
-    for(const extra of cands){
+    const extras=detours.flat().filter(x=>x.duration<=best*1.75).sort((x,y)=>x.duration-y.duration);
+    for(const extra of extras){
       if(dupLoose(extra))continue;
       routes.push(extra);
     }
