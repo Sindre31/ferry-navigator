@@ -23,10 +23,11 @@ Norsk fergeplanlegger for bilturer. Skriv inn hvor du skal — appen finner rute
 | Tjeneste | Brukes til |
 |---|---|
 | [Entur](https://developer.entur.org/) | Adressesøk (geocoder), fergetider, avvik og kanselleringer (journey-planner v3) |
-| [OSRM](http://project-osrm.org/) (demoserver) | Bilruting med fergedeteksjon (`mode: ferry` i OSM-data) |
+| [Google Maps Directions](https://developers.google.com/maps/documentation/javascript/directions) *(valgfritt)* | Primær bilruting med alternativer og fergedeteksjon — aktiveres med API-nøkkel |
+| [OSRM](http://project-osrm.org/) (demoserver) | Bilruting (fallback uten Google-nøkkel) |
 | [CartoDB](https://carto.com/) + [Leaflet](https://leafletjs.com/) | Mørke kartfliser og kartvisning |
 
-Alle kall gjøres direkte fra nettleseren — ingen backend, ingen API-nøkler.
+Alle kall gjøres direkte fra nettleseren — ingen backend. Google-ruting aktiveres med en API-nøkkel (Maps JavaScript API + Directions API): åpne appen én gang med `?gkey=DIN_NØKKEL` (lagres lokalt i nettleseren), eller sett `GOOGLE_KEY_DEFAULT` i `index.html` for alle brukere. Husk å begrense nøkkelen til appens domene i Google Cloud Console. Uten nøkkel brukes OSRM.
 
 > **Merk:** Fergeprisene er *estimater* beregnet fra kryssingens lengde (lineær tilpasning mot publiserte AutoPASS-takster) og merkes «estimat» i appen. OSRM-demoserveren har ingen oppetidsgaranti; ved jevn bruk bør rutingen flyttes til en betalt tjeneste eller egen OSRM-instans.
 

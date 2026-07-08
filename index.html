@@ -101,6 +101,73 @@ en:{
   viaLabel:'via'
 }};
 
+// ── Google Maps routing (optional; falls back to OSRM without a key) ──────
+// Set a key by opening the app once with ?gkey=YOUR_KEY (stored locally),
+// or hardcode it in GOOGLE_KEY_DEFAULT for all users of this deployment.
+const GOOGLE_KEY_DEFAULT='';
+const GOOGLE_KEY=(()=>{try{
+  const q=new URLSearchParams(location.search);
+  const k=q.get('gkey');
+  if(k){
+    localStorage.setItem('fn_gmaps_key',k);
+    q.delete('gkey');
+    history.replaceState(null,'',location.pathname+(q.toString()?'?'+q.toString():''));
+  }
+  return localStorage.getItem('fn_gmaps_key')||GOOGLE_KEY_DEFAULT;
+}catch(e){return GOOGLE_KEY_DEFAULT;}})();
+
+let gmapsLoader=null;
+function loadGoogle(){
+  if(!GOOGLE_KEY)return Promise.resolve(null);
+  if(window.google?.maps?.DirectionsService)return Promise.resolve(window.google);
+  if(!gmapsLoader)gmapsLoader=new Promise(res=>{
+    const sc=document.createElement('script');
+    sc.src=`https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(GOOGLE_KEY)}&language=no&region=NO`;
+    sc.onload=()=>res(window.google?.maps?.DirectionsService?window.google:null);
+    sc.onerror=()=>res(null);
+    document.head.appendChild(sc);
+  });
+  return gmapsLoader;
+}
+
+// Convert a Google DirectionsRoute to the internal (OSRM-shaped) format
+function convertGoogleRoute(rt){
+  const legs=rt.legs.map(leg=>({
+    summary:rt.summary||'',
+    steps:(leg.steps||[]).map(st=>({
+      mode:(st.maneuver==='ferry'||/ferge|ferje|ferry/i.test(st.instructions||''))?'ferry':'driving',
+      duration:st.duration?.value||0,
+      distance:st.distance?.value||0,
+      geometry:{coordinates:(st.path||[]).map(ll=>[ll.lng(),ll.lat()])}
+    }))
+  }));
+  return{
+    duration:rt.legs.reduce((s2,l)=>s2+(l.duration?.value||0),0),
+    distance:rt.legs.reduce((s2,l)=>s2+(l.distance?.value||0),0),
+    geometry:{coordinates:(rt.overview_path||[]).map(ll=>[ll.lng(),ll.lat()])},
+    legs
+  };
+}
+
+async function googleRoutes(points,opts){
+  const g=await loadGoogle();
+  if(!g)return null;
+  const svc=new g.maps.DirectionsService();
+  const req={
+    origin:{lat:points[0].lat,lng:points[0].lon},
+    destination:{lat:points[points.length-1].lat,lng:points[points.length-1].lon},
+    waypoints:points.slice(1,-1).map(p=>({location:{lat:p.lat,lng:p.lon},stopover:false})),
+    travelMode:g.maps.TravelMode?g.maps.TravelMode.DRIVING:'DRIVING',
+    provideRouteAlternatives:!!(opts&&opts.alternatives),
+    avoidFerries:!!(opts&&opts.avoidFerries),
+    region:'no'
+  };
+  const res=await new Promise(resolve=>{
+    try{svc.route(req,(r,status)=>resolve(status==='OK'?r:null));}catch(e){resolve(null);}
+  });
+  return res?res.routes.map(convertGoogleRoute):null;
+}
+
 // Retry transient network/server errors with backoff — mobile networks flake
 async function fetchRetry(url,opts,tries){
   tries=tries||3;
@@ -256,44 +323,76 @@ async function routeOSRM(points){
     if(routes.some(r=>dup(r,extra)))continue;
     routes.push(extra);
   }
-  // Quay-aware detour probing: OSRM rarely proposes ferry-heavy parallel
-  // corridors on its own. Find real ferry quays between the endpoints that
-  // lie well off the main route, and probe explicit routes via them —
-  // e.g. Koparnes forces the coastal Rv61 corridor from Ålesund.
-  if(!hasVia&&routes[0]?.geometry?.coordinates?.length>2){
-    const a=points[0],b=points[points.length-1];
-    const g=routes[0].geometry.coordinates;
-    const step=Math.max(1,Math.floor(g.length/60));
-    const sample=[];for(let i=0;i<g.length;i+=step)sample.push(g[i]);
-    const deg=(p,q)=>{const dx=(p[0]-q.lon)*Math.cos(q.lat*Math.PI/180),dy=p[1]-q.lat;return Math.hypot(dx,dy);};
-    const distToRoute=q=>Math.min(...sample.map(c=>deg(c,q)));
-    const dAB=deg([a.lon,a.lat],b)||1e-6;
-    const quays=await ferryQuaysInBox(a,b);
-    const cands=quays
-      .map(q=>({q,off:distToRoute(q),detour:(deg([a.lon,a.lat],q)+deg([b.lon,b.lat],q))/dAB}))
-      .filter(x=>x.off>8/111)      // well off the main route
-      .filter(x=>x.detour<1.5)     // still plausibly "between" the endpoints
-      .sort((x,y)=>x.detour-y.detour);
-    // one probe per area: skip quays within ~12 km of an already chosen one
-    const picked=[];
-    for(const c of cands){
-      if(picked.some(p=>deg([p.q.lon,p.q.lat],c.q)<12/111))continue;
-      picked.push(c);
-      if(picked.length>=4)break;
-    }
-    const detours=await Promise.all(picked.map(c=>fetchOSRM([a,c.q,b],'')));
-    // Looser dedupe: a probe that snaps back to the main corridor differs
-    // by a few spur minutes but is not a real alternative
-    const dupLoose=x=>routes.some(r=>
-      Math.abs(r.duration-x.duration)<Math.max(600,best*0.08)&&
-      Math.abs(r.distance-x.distance)<Math.max(8000,routes[0].distance*0.08));
-    const extras=detours.flat().filter(x=>x.duration<=best*1.75).sort((x,y)=>x.duration-y.duration);
-    for(const extra of extras){
-      if(dupLoose(extra))continue;
-      routes.push(extra);
-    }
-  }
+  await addQuayDetours(points,routes,pts=>fetchOSRM(pts,''));
   return routes.slice(0,6);
+}
+
+// Quay-aware detour probing: routers rarely propose ferry-heavy parallel
+// corridors on their own. Find real ferry quays between the endpoints that
+// lie well off the main route, and probe explicit routes via them —
+// e.g. Koparnes forces the coastal Rv61 corridor from Ålesund.
+async function addQuayDetours(points,routes,probe){
+  if(points.length>2||!(routes[0]?.geometry?.coordinates?.length>2))return;
+  const a=points[0],b=points[points.length-1];
+  const g=routes[0].geometry.coordinates;
+  const best=routes[0].duration;
+  const step=Math.max(1,Math.floor(g.length/60));
+  const sample=[];for(let i=0;i<g.length;i+=step)sample.push(g[i]);
+  const deg=(p,q)=>{const dx=(p[0]-q.lon)*Math.cos(q.lat*Math.PI/180),dy=p[1]-q.lat;return Math.hypot(dx,dy);};
+  const distToRoute=q=>Math.min(...sample.map(c=>deg(c,q)));
+  const dAB=deg([a.lon,a.lat],b)||1e-6;
+  const quays=await ferryQuaysInBox(a,b);
+  const cands=quays
+    .map(q=>({q,off:distToRoute(q),detour:(deg([a.lon,a.lat],q)+deg([b.lon,b.lat],q))/dAB}))
+    .filter(x=>x.off>8/111)      // well off the main route
+    .filter(x=>x.detour<1.5)     // still plausibly "between" the endpoints
+    .sort((x,y)=>x.detour-y.detour);
+  const picked=[];
+  for(const c of cands){
+    if(picked.some(p=>deg([p.q.lon,p.q.lat],c.q)<12/111))continue;
+    picked.push(c);
+    if(picked.length>=4)break;
+  }
+  const detours=await Promise.all(picked.map(c=>probe([a,c.q,b]).catch(()=>[])));
+  const dupLoose=x=>routes.some(r=>
+    Math.abs(r.duration-x.duration)<Math.max(600,best*0.08)&&
+    Math.abs(r.distance-x.distance)<Math.max(8000,routes[0].distance*0.08));
+  const extras=detours.flat().filter(x=>x&&x.duration<=best*1.75).sort((x,y)=>x.duration-y.duration);
+  for(const extra of extras){
+    if(dupLoose(extra))continue;
+    routes.push(extra);
+  }
+}
+
+// Google-based route finding: Google's own alternatives usually include
+// ferry corridors; ferry-free and quay probes fill in the rest
+async function googleFind(points){
+  const hasVia=points.length>2;
+  const [main,noFerry]=await Promise.all([
+    googleRoutes(points,{alternatives:!hasVia}),
+    googleRoutes(points,{avoidFerries:true})
+  ]);
+  let routes=(main||[]).slice();
+  if(!routes.length&&noFerry?.length)routes=[noFerry[0]];
+  if(!routes.length)throw new Error('NOROUTE');
+  const dup=(x,y)=>Math.abs(x.duration-y.duration)<180&&Math.abs(x.distance-y.distance)<3000;
+  const best=routes[0].duration;
+  for(const nf of(noFerry||[])){
+    if(nf.legs.some(l=>l.steps.some(st=>st.mode==='ferry')))continue;
+    if(nf.duration>best*1.75)continue;
+    if(routes.some(r=>dup(r,nf)))continue;
+    routes.push(nf);
+  }
+  await addQuayDetours(points,routes,pts=>googleRoutes(pts,{}).then(r=>r||[]));
+  return routes.slice(0,6);
+}
+
+// Route source orchestrator: Google when a key is configured, OSRM otherwise
+async function findRoutes(points){
+  if(GOOGLE_KEY&&await loadGoogle()){
+    try{return await googleFind(points);}catch(e){if(e.message==='NOROUTE')throw e;}
+  }
+  return routeOSRM(points);
 }
 
 async function findFerryStop(lat,lon,name){
@@ -444,7 +543,7 @@ async function planOneRoute(osrmRoute,{from,to,via,date,timeMin,mode,margin,lang
 // Plan every OSRM alternative (ferry route vs. driving around etc.)
 async function planAlternatives(opts){
   const points=[opts.from,...(opts.via?[opts.via]:[]),opts.to];
-  const routes=await routeOSRM(points);
+  const routes=await findRoutes(points);
   const settled=await Promise.allSettled(routes.map(rt=>planOneRoute(rt,opts)));
   const out=settled.filter(s=>s.status==='fulfilled').map(s=>s.value);
   if(!out.length)throw new Error('NOROUTE');
