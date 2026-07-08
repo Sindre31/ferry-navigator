@@ -71,8 +71,6 @@ no:{
   fareEst:'Fergetakst · estimat',
   errNoRoute:'Ingen rute funnet',errGeneric:'Noe gikk galt – prøv igjen',
   errPos:'Fikk ikke tilgang til posisjonen din',errPosSupport:'Posisjon støttes ikke i denne nettleseren',
-  errNotifDenied:'Varsler er blokkert i nettleseren',
-  notifTitle:'På tide å dra! ⛴',notifBody:t=>'Avreise '+t+' for å rekke fergen.',
   viaLabel:'via'
 },
 en:{
@@ -97,8 +95,6 @@ en:{
   fareEst:'Ferry fare · estimate',
   errNoRoute:'No route found',errGeneric:'Something went wrong – try again',
   errPos:'Could not access your location',errPosSupport:'Geolocation is not supported in this browser',
-  errNotifDenied:'Notifications are blocked in this browser',
-  notifTitle:'Time to leave! ⛴',notifBody:t=>'Leave at '+t+' to catch your ferry.',
   viaLabel:'via'
 }};
 
@@ -605,7 +601,7 @@ function PlanScreen({from,to,via,fromText,toText,viaText,fromSugs,toSugs,viaSugs
 }
 
 // ── ResultsScreen ──────────────────────────────────────────────────────────
-function ResultsScreen({results,selIdx,result,mode,margin,shared,notifAt,T,on}){
+function ResultsScreen({results,selIdx,result,mode,margin,shared,T,on}){
   const R=result||results[selIdx];
   return h('div',{style:{position:'absolute',inset:0,display:'flex',flexDirection:'column'}},
     // Map
@@ -681,7 +677,6 @@ function ResultsScreen({results,selIdx,result,mode,margin,shared,notifAt,T,on}){
           h('div',{style:{fontFamily:"'JetBrains Mono',monospace",fontSize:20,fontWeight:700}},R.numFerries?'≈'+R.cost+' kr':'0 kr'),
           h('div',{style:{fontSize:11,color:MUT}},R.costBreak)
         ),
-        ('Notification' in window)&&h('div',{onClick:()=>on('notify'),title:'Varsle før avreise',style:{padding:'14px 13px',borderRadius:16,background:PANEL,border:'1px solid '+(notifAt?ACC:'#222A33'),color:notifAt?ACC:'#EDF1F5',fontSize:14,fontWeight:700,fontFamily:"'JetBrains Mono',monospace",cursor:'pointer',whiteSpace:'nowrap'}},notifAt?'🔔 '+notifAt:'🔔'),
         h('div',{onClick:()=>on('share'),style:{padding:'14px 18px',borderRadius:16,background:PANEL,border:'1px solid '+(shared?ACC:'#222A33'),color:shared?ACC:'#EDF1F5',fontSize:14,fontWeight:700,fontFamily:"'Space Grotesk',sans-serif",cursor:'pointer',whiteSpace:'nowrap'}},shared?T.copied:T.share),
         R.numFerries>0&&h('div',{onClick:()=>on('openTT',0),style:{padding:'14px 22px',borderRadius:16,background:ACC,color:'#04181A',fontSize:14,fontWeight:700,fontFamily:"'Space Grotesk',sans-serif",cursor:'pointer'}},T.timetables)
       )
@@ -814,8 +809,6 @@ function App(){
   const [geoLoading,setGeoLoading]=useState(false);
   const [lang,setLang]=useState(()=>{try{return localStorage.getItem('fn_lang')==='en'?'en':'no';}catch(e){return 'no';}});
   const [anchors,setAnchors]=useState({});
-  const [notifAt,setNotifAt]=useState(null);
-  const notifTimer=useRef(null);
   const [nfText,setNfText]=useState('');
   const [nfSugs,setNfSugs]=useState([]);
   const [nfStop,setNfStop]=useState(null);
@@ -903,8 +896,7 @@ function App(){
   function runPlan(f,t,v){
     setLoading(true);setError(null);
     planAlternatives({from:f,to:t,via:v||null,date,timeMin,mode,margin,lang})
-      .then(r=>{setResults(r);setSelIdx(0);setSelectedFerry(0);setAnchors({});setNotifAt(null);
-        if(notifTimer.current){clearTimeout(notifTimer.current);notifTimer.current=null;}
+      .then(r=>{setResults(r);setSelIdx(0);setSelectedFerry(0);setAnchors({});
         setScreen('results');addRecent(f,t,v);})
       .catch(e=>setError(e.message==='NOROUTE'?T.errNoRoute:T.errGeneric))
       .finally(()=>setLoading(false));
@@ -969,27 +961,6 @@ function App(){
         break;}
       case 'lang':{setLang(data);try{localStorage.setItem('fn_lang',data);}catch(e){}break;}
       case 'pickDep': setAnchors(a=>({...a,[selIdx]:data}));break;
-      case 'notify':{
-        if(!result||!('Notification' in window))break;
-        Notification.requestPermission().then(perm=>{
-          if(perm!=='granted'){setError(T.errNotifDenied);return;}
-          const lead=15,mins=result.leaveBy-lead;
-          const [Y,Mo,Dd]=date.split('-').map(Number);
-          const mm=((mins%1440)+1440)%1440;
-          const target=new Date(Y,Mo-1,Dd+Math.floor(mins/1440),Math.floor(mm/60),mm%60);
-          const fire=()=>{
-            const body=T.notifBody(fmt(result.leaveBy));
-            const show=()=>{try{new Notification(T.notifTitle,{body,icon:'icons/icon-192.png'});}catch(e){}};
-            if(navigator.serviceWorker)navigator.serviceWorker.ready.then(reg=>reg.showNotification(T.notifTitle,{body,icon:'icons/icon-192.png',badge:'icons/icon-192.png'})).catch(show);
-            else show();
-          };
-          const ms=target.getTime()-Date.now();
-          if(notifTimer.current)clearTimeout(notifTimer.current);
-          if(ms<=0){fire();setNotifAt(fmt(mins));return;}
-          notifTimer.current=setTimeout(fire,ms);
-          setNotifAt(fmt(mins));
-        });
-        break;}
       case 'nfText': setNfText(data);setNfStop(null);break;
       case 'nfSelect':{
         setNfStop(data);setNfText(data.name);setNfSugs([]);setNfLoading(true);setNfDeps(null);
@@ -1009,7 +980,7 @@ function App(){
 
   const inner=h('div',{style:{width:'100%',height:'100%',borderRadius:mobile?0:42,overflow:'hidden',background:'#0B0E11',position:'relative',color:'#EDF1F5',fontFamily:"'DM Sans',sans-serif"}},
     screen==='plan'&&h(PlanScreen,{from,to,via,fromText,toText,viaText,fromSugs,toSugs,viaSugs,showVia,date,mode,timeMin,margin,now,loading,error,recents,geoLoading,T,lang,on}),
-    screen==='results'&&result&&h(ResultsScreen,{results,selIdx,result,mode,margin,shared,notifAt,T,on}),
+    screen==='results'&&result&&h(ResultsScreen,{results,selIdx,result,mode,margin,shared,T,on}),
     screen==='timetable'&&result&&h(TimetableScreen,{result,selectedFerry,now,T,lang,on}),
     screen==='nextferry'&&h(NextFerryScreen,{T,lang,now,nfText,nfSugs,nfStop,nfDeps,nfLoading,on}),
     h(TabBar,{screen,hasResult:!!result,T,on})
