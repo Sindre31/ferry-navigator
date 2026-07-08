@@ -64,13 +64,18 @@ function nowMinutes(){
 
 function todayOslo(){return new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Oslo'}).format(new Date());}
 
-function buildShareUrl({from,to,date,mode,timeMin,margin}){
+function buildShareUrl({from,to,via,date,mode,timeMin,margin}){
   const p=new URLSearchParams();
   p.set('fra',from.name);p.set('fra_p',from.lat.toFixed(5)+','+from.lon.toFixed(5));
   p.set('til',to.name);p.set('til_p',to.lat.toFixed(5)+','+to.lon.toFixed(5));
+  if(via){p.set('via',via.name);p.set('via_p',via.lat.toFixed(5)+','+via.lon.toFixed(5));}
   p.set('dato',date);p.set('modus',mode);p.set('tid',String(timeMin));p.set('buffer',String(margin));
   return location.origin+location.pathname+'?'+p.toString();
 }
+
+function loadRecents(){try{const r=JSON.parse(localStorage.getItem('fn_recents')||'[]');return Array.isArray(r)?r:[];}catch(e){return[];}}
+function saveRecents(r){try{localStorage.setItem('fn_recents',JSON.stringify(r));}catch(e){}}
+function recentKey(r){return r.from.name+'|'+r.to.name+'|'+(r.via?.name||'');}
 
 function parseShareUrl(){
   const q=new URLSearchParams(location.search);
@@ -79,8 +84,11 @@ function parseShareUrl(){
   const from={name:q.get('fra'),lat:+fp[0],lon:+fp[1]};
   const to={name:q.get('til'),lat:+tp[0],lon:+tp[1]};
   if([from.lat,from.lon,to.lat,to.lon].some(isNaN))return null;
+  let via=null;
+  const vp=(q.get('via_p')||'').split(',');
+  if(q.get('via')&&vp.length===2&&!isNaN(+vp[0])&&!isNaN(+vp[1]))via={name:q.get('via'),lat:+vp[0],lon:+vp[1]};
   const mg=parseInt(q.get('buffer'),10);
-  return{from,to,
+  return{from,to,via,
     date:/^\d{4}-\d{2}-\d{2}$/.test(q.get('dato')||'')?q.get('dato'):todayOslo(),
     mode:q.get('modus')==='leave'?'leave':'arrive',
     timeMin:Math.min(1410,Math.max(0,parseInt(q.get('tid'),10)||1080)),
@@ -113,21 +121,24 @@ async function searchPlaces(text){
   return(d.features||[]).map(f=>({name:f.properties.label||f.properties.name,lat:f.geometry.coordinates[1],lon:f.geometry.coordinates[0],id:f.properties.id}));
 }
 
-async function fetchOSRM(from,to,params){
+async function fetchOSRM(points,params){
   try{
-    const r=await fetch(`https://router.project-osrm.org/route/v1/driving/${from.lon},${from.lat};${to.lon},${to.lat}?steps=true&geometries=geojson&overview=full&`+params);
+    const cs=points.map(p=>p.lon+','+p.lat).join(';');
+    const r=await fetch(`https://router.project-osrm.org/route/v1/driving/${cs}?steps=true&geometries=geojson&overview=full&`+params);
     const d=await r.json();
     return d.code==='Ok'?(d.routes||[]):[];
   }catch(e){return [];}
 }
 
-async function routeOSRM(from,to){
-  // Up to 3 alternatives, plus an explicit ferry-free route when one exists
+async function routeOSRM(points){
+  // Up to 3 alternatives, plus an explicit ferry-free route when one exists.
+  // OSRM only supports alternatives for two-point requests, so via routes get one.
+  const hasVia=points.length>2;
   const [main,noFerry]=await Promise.all([
-    fetchOSRM(from,to,'alternatives=3'),
-    fetchOSRM(from,to,'exclude=ferry')
+    fetchOSRM(points,hasVia?'':'alternatives=3'),
+    fetchOSRM(points,'exclude=ferry')
   ]);
-  let routes=main.length?main:await fetchOSRM(from,to,'alternatives=true');
+  let routes=main.length?main:(hasVia?[]:await fetchOSRM(points,'alternatives=true'));
   if(!routes.length&&noFerry.length)routes=noFerry.slice(0,1);
   if(!routes.length)throw new Error('Ingen rute funnet');
   const dup=(a,b)=>Math.abs(a.duration-b.duration)<180&&Math.abs(a.distance-b.distance)<3000;
@@ -164,17 +175,38 @@ async function findFerryStop(lat,lon,name){
 }
 
 async function getFerryDeps(stopId,dateStr){
-  // 48h window from the travel date so schedules work past midnight
-  const q=`{stopPlace(id:"${stopId}"){estimatedCalls(startTime:"${dateStr}T00:00:00+02:00" timeRange:172800 numberOfDepartures:200 whiteListedModes:[water]){expectedDepartureTime}}}`;
+  // 48h window from the travel date so schedules work past midnight;
+  // cancellation flags and service disruptions (situations) come along
+  const q=`{stopPlace(id:"${stopId}"){situations{summary{value language}}estimatedCalls(startTime:"${dateStr}T00:00:00+02:00" timeRange:172800 numberOfDepartures:200 whiteListedModes:[water]){expectedDepartureTime cancellation}}}`;
   const r=await fetch('https://api.entur.io/journey-planner/v3/graphql',{method:'POST',headers:{'Content-Type':'application/json','ET-Client-Name':'ferrynav-app'},body:JSON.stringify({query:q})});
   const{data}=await r.json();
-  return(data?.stopPlace?.estimatedCalls||[]).map(c=>isoToMin(c.expectedDepartureTime,dateStr)).filter(x=>x!==null&&x>=0).sort((a,b)=>a-b);
+  const sp=data?.stopPlace;
+  const deps=(sp?.estimatedCalls||[]).map(c=>({t:isoToMin(c.expectedDepartureTime,dateStr),cancelled:!!c.cancellation}))
+    .filter(x=>x.t!==null&&x.t>=0).sort((a,b)=>a.t-b.t);
+  const alerts=[...new Set((sp?.situations||[]).map(s=>{
+    const sm=s.summary||[];
+    const no=sm.find(x=>x.language==='no'||x.language==='nob')||sm[0];
+    return no?.value||'';
+  }).filter(Boolean))];
+  return{deps,alerts};
+}
+
+// Estimated AutoPASS car fare from crossing length (linear fit against
+// published fares, e.g. Lavik–Oppedal ~5.6km→~172, Moss–Horten ~10km→~260)
+function ferryFare(km){return Math.max(80,Math.round(60+km*20));}
+
+async function reverseAddress(lat,lon){
+  try{
+    const r=await fetch(`https://api.entur.io/geocoder/v1/reverse?point.lat=${lat}&point.lon=${lon}&size=1&layers=address`,{headers:{'ET-Client-Name':'ferrynav-app'}});
+    const d=await r.json();
+    return d.features?.[0]?.properties?.label||null;
+  }catch(e){return null;}
 }
 
 // ── route planner ──────────────────────────────────────────────────────────
 function shortStop(n){return n?n.replace(/\s*(ferjekai|fergekai|ferjeleie|fergeleie|kai)\s*$/i,'').trim():null;}
 
-async function planOneRoute(osrmRoute,{from,to,date,timeMin,mode,margin}){
+async function planOneRoute(osrmRoute,{from,to,via,date,timeMin,mode,margin}){
   const allSteps=osrmRoute.legs.flatMap(l=>l.steps);
 
   // Build drive/ferry segments from OSRM steps
@@ -186,6 +218,7 @@ async function planOneRoute(osrmRoute,{from,to,date,timeMin,mode,margin}){
       ds=0;dm=0;
       const coords=step.geometry?.coordinates||[];
       segs.push({type:'ferry',dur:Math.max(Math.round(step.duration/60),5),osrmName:step.name||'',
+        km:(step.distance||0)/1000,
         fromCoords:coords.length?{lat:coords[0][1],lon:coords[0][0]}:{lat:from.lat,lon:from.lon},
         toCoords:coords.length>1?{lat:coords[coords.length-1][1],lon:coords[coords.length-1][0]}:null});
     }else{ds+=step.duration||0;dm+=step.distance||0;}
@@ -202,12 +235,15 @@ async function planOneRoute(osrmRoute,{from,to,date,timeMin,mode,margin}){
       findFerryStop(seg.fromCoords.lat,seg.fromCoords.lon,seg.osrmName),
       seg.toCoords?findFerryStop(seg.toCoords.lat,seg.toCoords.lon,null):Promise.resolve(null)
     ]);
-    let deps=[],isLive=false;
-    if(stopA?.id){deps=await getFerryDeps(stopA.id,date);isLive=deps.length>0;}
+    let all=[],alerts=[],isLive=false;
+    if(stopA?.id){const r=await getFerryDeps(stopA.id,date);all=r.deps;alerts=r.alerts;isLive=all.length>0;}
+    if(!all.length)all=gen(360,1380,30).concat(gen(1800,2820,30)).map(t=>({t,cancelled:false}));
+    const usable=all.filter(d=>!d.cancelled).map(d=>d.t);
     const a=shortStop(stopA?.name),b=shortStop(stopB?.name);
     const label=a&&b&&a!==b?a+' – '+b:(a||seg.osrmName||'Ferge');
     FERRIES.push({name:label,fromKai:stopA?.name,toKai:stopB?.name,stopId:stopA?.id,
-      crossingMin:seg.dur,fare:124,dep:deps.length?deps:gen(360,1380,30).concat(gen(1800,2820,30)),isLive});
+      crossingMin:seg.dur,fare:ferryFare(seg.km||0),
+      dep:usable.length?usable:all.map(d=>d.t),allDeps:all,alerts,isLive});
   }
 
   // Backward scheduling for arrive-by mode
@@ -236,7 +272,7 @@ async function planOneRoute(osrmRoute,{from,to,date,timeMin,mode,margin}){
     steps.push({type:'ferry',time:dep,timeColor:'#37C2F0',title:'Ferge · '+F.name,
       sub:buf+' min buffer · '+F.crossingMin+' min kryssing',
       sub2:nd?.dur?'deretter kjør '+durFmt(nd.dur)+' · '+nd.km+' km':'',
-      hasSub2:!!(nd?.dur),notLast:true,ferryIdx:i});
+      hasSub2:!!(nd?.dur),notLast:true,ferryIdx:i,alert:F.alerts[0]||null});
     t=dep+F.crossingMin+(nd?.dur||0);
   }
   const arrive=t;
@@ -245,15 +281,17 @@ async function planOneRoute(osrmRoute,{from,to,date,timeMin,mode,margin}){
   const ferryCost=FERRIES.reduce((s,f)=>s+f.fare,0);
   const totalKm=DRIVES.reduce((s,d)=>s+(d.km||0),0);
   return{leaveBy,arrive,total:arrive-leaveBy,distance:totalKm,numFerries:FERRIES.length,
-    cost:ferryCost+100,costBreak:FERRIES.length?'Ferge '+ferryCost+' · Bom ~100':'Bom ~100',
+    cost:ferryCost,costBreak:FERRIES.length?'Fergetakst · estimat':'Uten ferge',
     isFerry:FERRIES.length>0,boarded,steps,ferries:FERRIES,osrmRoute,osrmSteps:allSteps,from,to,
+    viaPoint:via||null,
     via:osrmRoute.legs?.[0]?.summary||'',
     isLive:FERRIES.some(f=>f.isLive)};
 }
 
 // Plan every OSRM alternative (ferry route vs. driving around etc.)
 async function planAlternatives(opts){
-  const routes=await routeOSRM(opts.from,opts.to);
+  const points=[opts.from,...(opts.via?[opts.via]:[]),opts.to];
+  const routes=await routeOSRM(points);
   const settled=await Promise.allSettled(routes.map(rt=>planOneRoute(rt,opts)));
   const out=settled.filter(s=>s.status==='fulfilled').map(s=>s.value);
   if(!out.length)throw new Error('Ingen rute funnet');
@@ -294,6 +332,8 @@ function MapView({results,selIdx,from,to,onSelect}){
     }
     const mk=(fill,border)=>L.divIcon({html:`<div style="width:13px;height:13px;border-radius:50%;background:${fill};border:3px solid ${border};box-sizing:border-box;"></div>`,className:'',iconSize:[13,13],iconAnchor:[6,6]});
     if(from){L.marker([from.lat,from.lon],{icon:mk('#0B0E11',ACC)}).addTo(map);bounds.extend([from.lat,from.lon]);}
+    const viaPoint=results[selIdx]?.viaPoint;
+    if(viaPoint){L.marker([viaPoint.lat,viaPoint.lon],{icon:mk('#EDB93B','#EDB93B')}).addTo(map);bounds.extend([viaPoint.lat,viaPoint.lon]);}
     if(to){L.marker([to.lat,to.lon],{icon:mk(ACC,ACC)}).addTo(map);bounds.extend([to.lat,to.lon]);}
     if(bounds.isValid())map.fitBounds(bounds,{padding:[28,28]});
     mRef.current=map;
@@ -311,13 +351,14 @@ function DataBadge({src}){
 }
 
 // ── PlanScreen ─────────────────────────────────────────────────────────────
-function PlanScreen({from,to,fromText,toText,fromSugs,toSugs,date,mode,timeMin,margin,now,loading,error,on}){
+function PlanScreen({from,to,via,fromText,toText,viaText,fromSugs,toSugs,viaSugs,showVia,date,mode,timeMin,margin,now,loading,error,recents,geoLoading,on}){
   const fillPct=Math.round(margin/45*100)+'%';
   const trackBg=`linear-gradient(to right,${ACC} ${fillPct},#0B0E11 ${fillPct})`;
   const p=v=>({bg:margin===v?ACC:'#0B0E11',fg:margin===v?'#04181A':MUT});
   const sugsStyle={marginTop:6,borderRadius:10,overflow:'hidden',border:'1px solid #222A33'};
   const sugItem=(s,i,cb)=>h('div',{key:i,onClick:cb,style:{padding:'10px 14px',cursor:'pointer',background:i%2?'#151b27':'#1a2030',fontSize:13,color:'#EDF1F5',display:'flex',gap:8,alignItems:'center'}},
     h('span',{style:{color:MUT,fontSize:11}},'⌖'),s.name);
+  const shortName=n=>(n||'').split(',')[0];
 
   return h('div',{className:'scroll-hide',style:{position:'absolute',inset:0,overflowY:'auto',paddingBottom:'calc(84px + env(safe-area-inset-bottom))'}},
     // status bar
@@ -337,19 +378,35 @@ function PlanScreen({from,to,fromText,toText,fromSugs,toSugs,date,mode,timeMin,m
         h('div',{style:{padding:'8px 12px 10px',borderBottom:'1px solid #222A33'}},
           h('div',{style:{display:'flex',alignItems:'center',gap:12}},
             h('div',{style:{width:11,height:11,borderRadius:'50%',border:'2.5px solid '+ACC,flex:'none'}}),
-            h('div',{style:{flex:1}},
+            h('div',{style:{flex:1,minWidth:0}},
               h('div',{style:{fontSize:11,color:MUT,letterSpacing:'.08em',textTransform:'uppercase',marginBottom:3}},'Fra'),
               h('input',{type:'text',value:fromText,placeholder:'By, adresse, stoppested…',onChange:e=>on('fromText',e.target.value),
                 style:{width:'100%',background:'transparent',border:'none',outline:'none',color:'#EDF1F5',fontSize:16,fontWeight:600,fontFamily:"'Space Grotesk',sans-serif",padding:0}})
-            )
+            ),
+            h('div',{onClick:geoLoading?null:()=>on('myLocation'),title:'Bruk min posisjon',
+              style:{width:34,height:34,borderRadius:'50%',background:'#0B0E11',border:'1px solid #222A33',display:'flex',alignItems:'center',justifyContent:'center',fontSize:15,cursor:'pointer',flex:'none',marginRight:44,color:geoLoading?ACC:'#9aa3ad'}},
+              geoLoading?'⟳':'⌖')
           ),
           fromSugs.length>0&&h('div',{style:sugsStyle},fromSugs.map((s,i)=>sugItem(s,i,()=>on('selectFrom',s))))
+        ),
+        // Via (optional)
+        showVia&&h('div',{style:{padding:'8px 12px 10px',borderBottom:'1px solid #222A33'}},
+          h('div',{style:{display:'flex',alignItems:'center',gap:12}},
+            h('div',{style:{width:10,height:10,background:'#EDB93B',transform:'rotate(45deg)',flex:'none',borderRadius:2}}),
+            h('div',{style:{flex:1,minWidth:0}},
+              h('div',{style:{fontSize:11,color:MUT,letterSpacing:'.08em',textTransform:'uppercase',marginBottom:3}},'Via'),
+              h('input',{type:'text',value:viaText,placeholder:'Innom sted…',onChange:e=>on('viaText',e.target.value),
+                style:{width:'100%',background:'transparent',border:'none',outline:'none',color:'#EDF1F5',fontSize:16,fontWeight:600,fontFamily:"'Space Grotesk',sans-serif",padding:0}})
+            ),
+            h('div',{onClick:()=>on('removeVia'),style:{width:34,height:34,borderRadius:'50%',background:'#0B0E11',border:'1px solid #222A33',display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,cursor:'pointer',flex:'none',marginRight:44,color:'#9aa3ad'}},'✕')
+          ),
+          viaSugs.length>0&&h('div',{style:sugsStyle},viaSugs.map((s,i)=>sugItem(s,i,()=>on('selectVia',s))))
         ),
         // To
         h('div',{style:{padding:'8px 12px 10px'}},
           h('div',{style:{display:'flex',alignItems:'center',gap:12}},
             h('div',{style:{width:11,height:11,borderRadius:2,background:ACC,flex:'none'}}),
-            h('div',{style:{flex:1}},
+            h('div',{style:{flex:1,minWidth:0}},
               h('div',{style:{fontSize:11,color:MUT,letterSpacing:'.08em',textTransform:'uppercase',marginBottom:3}},'Til'),
               h('input',{type:'text',value:toText,placeholder:'By, adresse, stoppested…',onChange:e=>on('toText',e.target.value),
                 style:{width:'100%',background:'transparent',border:'none',outline:'none',color:'#EDF1F5',fontSize:16,fontWeight:600,fontFamily:"'Space Grotesk',sans-serif",padding:0}})
@@ -357,8 +414,23 @@ function PlanScreen({from,to,fromText,toText,fromSugs,toSugs,date,mode,timeMin,m
           ),
           toSugs.length>0&&h('div',{style:sugsStyle},toSugs.map((s,i)=>sugItem(s,i,()=>on('selectTo',s))))
         ),
-        // Swap
-        h('div',{onClick:()=>on('swap'),style:{position:'absolute',right:16,top:'50%',transform:'translateY(-50%)',width:36,height:36,borderRadius:'50%',background:'#0B0E11',border:'1px solid #222A33',display:'flex',alignItems:'center',justifyContent:'center',color:'#9aa3ad',fontSize:16,cursor:'pointer',zIndex:2}},'⇅')
+        // Add via
+        !showVia&&h('div',{onClick:()=>on('addVia'),style:{padding:'2px 12px 10px 35px',fontSize:12,color:MUT,cursor:'pointer'}},'+ Legg til via-punkt'),
+        // Swap (hidden while via row is open to avoid overlap)
+        !showVia&&h('div',{onClick:()=>on('swap'),style:{position:'absolute',right:16,top:'50%',transform:'translateY(-50%)',width:36,height:36,borderRadius:'50%',background:'#0B0E11',border:'1px solid #222A33',display:'flex',alignItems:'center',justifyContent:'center',color:'#9aa3ad',fontSize:16,cursor:'pointer',zIndex:2}},'⇅')
+      ),
+      // Recents / favorites
+      recents.length>0&&h('div',{style:{background:PANEL,borderRadius:16,padding:'4px 8px'}},
+        recents.map((r,i)=>h('div',{key:recentKey(r),onClick:()=>on('recent',r),
+          style:{display:'flex',alignItems:'center',gap:10,padding:'11px 8px',borderBottom:i<recents.length-1?'1px solid #222A33':'none',cursor:'pointer'}},
+          h('div',{onClick:e=>{e.stopPropagation();on('toggleFav',r);},
+            style:{fontSize:17,color:r.fav?'#EDB93B':'#3a444f',flex:'none',width:26,textAlign:'center',lineHeight:1}},r.fav?'★':'☆'),
+          h('div',{style:{flex:1,minWidth:0}},
+            h('div',{style:{fontSize:13,fontWeight:600,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}},shortName(r.from.name)+' → '+shortName(r.to.name)),
+            r.via?h('div',{style:{fontSize:11,color:MUT}},'via '+shortName(r.via.name)):null
+          ),
+          h('div',{style:{color:MUT,fontSize:15,flex:'none'}},'›')
+        ))
       ),
       // Date + mode
       h('div',{style:{background:PANEL,borderRadius:16,padding:'14px 16px',display:'flex',flexDirection:'column',gap:12}},
@@ -458,7 +530,8 @@ function ResultsScreen({results,selIdx,mode,margin,shared,on}){
               h('div',{style:{fontFamily:"'JetBrains Mono',monospace",fontSize:15,fontWeight:700,color:step.timeColor}},fmt(step.time)+(step.time>=1440?' +1':'')),
               h('div',{style:{fontSize:15,fontWeight:600,fontFamily:"'Space Grotesk',sans-serif"}},step.title),
               h('div',{style:{fontSize:12,color:MUT}},step.sub),
-              step.hasSub2?h('div',{style:{fontSize:12,color:MUT,marginTop:1}},step.sub2):null
+              step.hasSub2?h('div',{style:{fontSize:12,color:MUT,marginTop:1}},step.sub2):null,
+              step.alert?h('div',{style:{fontSize:11,color:'#EDB93B',background:'rgba(237,185,59,.1)',border:'1px solid rgba(237,185,59,.3)',borderRadius:8,padding:'6px 9px',marginTop:6}},'⚠ '+step.alert):null
             )
           )
         ))
@@ -466,7 +539,7 @@ function ResultsScreen({results,selIdx,mode,margin,shared,on}){
       // Footer
       h('div',{style:{position:'sticky',bottom:0,background:'#11151B',display:'flex',alignItems:'center',gap:12,padding:'12px 0 20px',borderTop:'1px solid #1c2027',marginTop:4}},
         h('div',{style:{flex:1}},
-          h('div',{style:{fontFamily:"'JetBrains Mono',monospace",fontSize:20,fontWeight:700}},R.cost+' kr'),
+          h('div',{style:{fontFamily:"'JetBrains Mono',monospace",fontSize:20,fontWeight:700}},R.numFerries?'≈'+R.cost+' kr':'0 kr'),
           h('div',{style:{fontSize:11,color:MUT}},R.costBreak)
         ),
         h('div',{onClick:()=>on('share'),style:{padding:'14px 18px',borderRadius:16,background:PANEL,border:'1px solid '+(shared?ACC:'#222A33'),color:shared?ACC:'#EDF1F5',fontSize:14,fontWeight:700,fontFamily:"'Space Grotesk',sans-serif",cursor:'pointer',whiteSpace:'nowrap'}},shared?'✓ Kopiert':'Del'),
@@ -484,7 +557,8 @@ function TimetableScreen({result,selectedFerry,now,on}){
   const center=boarded!=null?boarded:now;
   // Everything from just before your ferry through the next 24 hours,
   // so missing a late departure still shows tonight's and tomorrow's options
-  const items=F.dep.filter(d=>d>=center-90&&d<=center+1440).map(d=>({time:fmt(d),arr:fmt(d+F.crossingMin),isB:d===boarded,nextDay:d>=1440}));
+  const items=(F.allDeps||F.dep.map(t=>({t,cancelled:false}))).filter(d=>d.t>=center-90&&d.t<=center+1440)
+    .map(d=>({time:fmt(d.t),arr:fmt(d.t+F.crossingMin),isB:d.t===boarded&&!d.cancelled,nextDay:d.t>=1440,cancelled:d.cancelled}));
   return h('div',{className:'scroll-hide',style:{position:'absolute',inset:0,overflowY:'auto',paddingBottom:'calc(84px + env(safe-area-inset-bottom))'}},
     h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'calc(16px + env(safe-area-inset-top)) 26px 4px',fontFamily:"'JetBrains Mono',monospace",fontSize:13,fontWeight:600}},
       h('div',{style:{display:'flex',alignItems:'center',gap:6}},h('span',null,fmt(now)),h(DataBadge,{src:F.isLive?'live':'demo'})),
@@ -503,16 +577,20 @@ function TimetableScreen({result,selectedFerry,now,on}){
       h('span',null,'Neste døgn'),
       boarded!=null&&h('span',null,'Din ferge markert')
     ),
+    F.alerts?.length>0&&h('div',{style:{margin:'4px 20px 8px',padding:'10px 14px',borderRadius:12,background:'rgba(237,185,59,.1)',border:'1px solid rgba(237,185,59,.35)',fontSize:12,color:'#EDB93B',lineHeight:1.45}},
+      F.alerts.slice(0,2).map((a,i)=>h('div',{key:i},'⚠ '+a))
+    ),
     h('div',{style:{padding:'6px 20px 0',display:'flex',flexDirection:'column',gap:8}},
       items.length===0
         ?h('div',{style:{textAlign:'center',padding:40,color:MUT}},'Ingen avganger i dette tidsrommet')
-        :items.map((t,i)=>h('div',{key:i,style:{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'15px 18px',borderRadius:14,background:t.isB?'rgba(43,217,208,.12)':PANEL,border:'1px solid '+(t.isB?ACC:'#222A33')}},
+        :items.map((t,i)=>h('div',{key:i,style:{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'15px 18px',borderRadius:14,opacity:t.cancelled?.55:1,background:t.isB?'rgba(43,217,208,.12)':PANEL,border:'1px solid '+(t.isB?ACC:t.cancelled?'rgba(255,90,90,.35)':'#222A33')}},
           h('div',{style:{display:'flex',alignItems:'center',gap:14}},
-            h('span',{style:{fontFamily:"'JetBrains Mono',monospace",fontSize:18,fontWeight:700,color:t.isB?ACC:'#EDF1F5'}},t.time),
+            h('span',{style:{fontFamily:"'JetBrains Mono',monospace",fontSize:18,fontWeight:700,color:t.isB?ACC:'#EDF1F5',textDecoration:t.cancelled?'line-through':'none'}},t.time),
             h('span',{style:{fontSize:12,color:MUT}},'→ '+t.arr),
             t.nextDay?h('span',{style:{fontSize:10,fontWeight:700,color:'#37C2F0',background:'rgba(55,194,240,.12)',padding:'2px 7px',borderRadius:8,letterSpacing:'.04em'}},'I MORGEN'):null
           ),
-          t.isB?h('span',{style:{fontSize:12,fontWeight:700,color:ACC}},'DIN FERGE'):null
+          t.cancelled?h('span',{style:{fontSize:12,fontWeight:700,color:'#FF6B6B'}},'INNSTILT')
+            :t.isB?h('span',{style:{fontSize:12,fontWeight:700,color:ACC}},'DIN FERGE'):null
         ))
     )
   );
@@ -547,6 +625,12 @@ function App(){
   const [toText,setToText]=useState('');
   const [fromSugs,setFromSugs]=useState([]);
   const [toSugs,setToSugs]=useState([]);
+  const [via,setVia]=useState(null);
+  const [viaText,setViaText]=useState('');
+  const [viaSugs,setViaSugs]=useState([]);
+  const [showVia,setShowVia]=useState(false);
+  const [recents,setRecents]=useState(loadRecents);
+  const [geoLoading,setGeoLoading]=useState(false);
   const [date,setDate]=useState(todayOslo);
   const [mode,setMode]=useState('arrive');
   const [timeMin,setTimeMin]=useState(1080);
@@ -574,9 +658,10 @@ function App(){
     const s=parseShareUrl();
     if(!s)return;
     setFrom(s.from);setTo(s.to);setFromText(s.from.name);setToText(s.to.name);
+    if(s.via){setVia(s.via);setViaText(s.via.name);setShowVia(true);}
     setDate(s.date);setMode(s.mode);setTimeMin(s.timeMin);setMargin(s.margin);
     setLoading(true);
-    planAlternatives({from:s.from,to:s.to,date:s.date,timeMin:s.mode==='leave'?nowMinutes():s.timeMin,mode:s.mode,margin:s.margin})
+    planAlternatives({from:s.from,to:s.to,via:s.via,date:s.date,timeMin:s.mode==='leave'?nowMinutes():s.timeMin,mode:s.mode,margin:s.margin})
       .then(r=>{setResults(r);setSelIdx(0);setScreen('results');})
       .catch(e=>setError(e.message||'Noe gikk galt'))
       .finally(()=>setLoading(false));
@@ -594,7 +679,36 @@ function App(){
     return()=>clearTimeout(t);
   },[toText,to]);
 
+  useEffect(()=>{
+    if(viaText.length<2||(via&&via.name===viaText)){setViaSugs([]);return;}
+    const t=setTimeout(()=>searchPlaces(viaText).then(setViaSugs).catch(()=>{}),350);
+    return()=>clearTimeout(t);
+  },[viaText,via]);
+
   const result=results?results[selIdx]:null;
+
+  function addRecent(f,t,v){
+    setRecents(prev=>{
+      const item={from:f,to:t,via:v||null,fav:false,ts:Date.now()};
+      const k=recentKey(item);
+      const old=prev.find(r=>recentKey(r)===k);
+      if(old)item.fav=old.fav;
+      let next=[item,...prev.filter(r=>recentKey(r)!==k)];
+      next.sort((a,b)=>(b.fav?1:0)-(a.fav?1:0)||(b.ts||0)-(a.ts||0));
+      next=[...next.filter(r=>r.fav),...next.filter(r=>!r.fav).slice(0,5)].slice(0,8);
+      saveRecents(next);
+      return next;
+    });
+  }
+
+  function runPlan(f,t,v){
+    setLoading(true);setError(null);
+    const actualTime=mode==='leave'?nowMinutes():timeMin;
+    planAlternatives({from:f,to:t,via:v||null,date,timeMin:actualTime,mode,margin})
+      .then(r=>{setResults(r);setSelIdx(0);setSelectedFerry(0);setScreen('results');addRecent(f,t,v);})
+      .catch(e=>setError(e.message||'Noe gikk galt'))
+      .finally(()=>setLoading(false));
+  }
 
   function on(action,data){
     switch(action){
@@ -602,6 +716,36 @@ function App(){
       case 'toText': setToText(data);setTo(null);break;
       case 'selectFrom': setFrom(data);setFromText(data.name);setFromSugs([]);break;
       case 'selectTo': setTo(data);setToText(data.name);setToSugs([]);break;
+      case 'viaText': setViaText(data);setVia(null);break;
+      case 'selectVia': setVia(data);setViaText(data.name);setViaSugs([]);break;
+      case 'addVia': setShowVia(true);break;
+      case 'removeVia': setVia(null);setViaText('');setViaSugs([]);setShowVia(false);break;
+      case 'myLocation':{
+        if(!navigator.geolocation){setError('Posisjon støttes ikke i denne nettleseren');break;}
+        setGeoLoading(true);setError(null);
+        navigator.geolocation.getCurrentPosition(async pos=>{
+          const lat=pos.coords.latitude,lon=pos.coords.longitude;
+          const name=(await reverseAddress(lat,lon))||'Min posisjon';
+          setFrom({name,lat,lon});setFromText(name);setFromSugs([]);setGeoLoading(false);
+        },()=>{setError('Fikk ikke tilgang til posisjonen din');setGeoLoading(false);},
+        {enableHighAccuracy:true,timeout:10000});
+        break;}
+      case 'recent':{
+        setFrom(data.from);setFromText(data.from.name);
+        setTo(data.to);setToText(data.to.name);
+        if(data.via){setVia(data.via);setViaText(data.via.name);setShowVia(true);}
+        else{setVia(null);setViaText('');setShowVia(false);}
+        runPlan(data.from,data.to,data.via||null);
+        break;}
+      case 'toggleFav':{
+        setRecents(prev=>{
+          const k=recentKey(data);
+          const next=prev.map(r=>recentKey(r)===k?{...r,fav:!r.fav}:r);
+          next.sort((a,b)=>(b.fav?1:0)-(a.fav?1:0)||(b.ts||0)-(a.ts||0));
+          saveRecents(next);
+          return next;
+        });
+        break;}
       case 'swap':{const f=from,t2=to,ft=fromText,tt=toText;setFrom(t2);setTo(f);setFromText(tt);setToText(ft);setFromSugs([]);setToSugs([]);break;}
       case 'date': setDate(data);break;
       case 'setLeaveNow': setMode('leave');break;
@@ -610,18 +754,11 @@ function App(){
       case 'timePlus': setTimeMin(t=>Math.min(1410,t+15));break;
       case 'margin': setMargin(data);break;
       case 'preset': setMargin(data);break;
-      case 'findRoute':{
-        setLoading(true);setError(null);
-        const actualTime=mode==='leave'?nowMinutes():timeMin;
-        planAlternatives({from,to,date,timeMin:actualTime,mode,margin})
-          .then(r=>{setResults(r);setSelIdx(0);setScreen('results');})
-          .catch(e=>setError(e.message||'Noe gikk galt'))
-          .finally(()=>setLoading(false));
-        break;}
+      case 'findRoute': runPlan(from,to,via);break;
       case 'selAlt': setSelIdx(data);setSelectedFerry(0);break;
       case 'share':{
         if(!result)break;
-        const url=buildShareUrl({from:result.from,to:result.to,date,mode,timeMin,margin});
+        const url=buildShareUrl({from:result.from,to:result.to,via:result.viaPoint,date,mode,timeMin,margin});
         const done=()=>{setShared(true);setTimeout(()=>setShared(false),2200);};
         if(navigator.share){
           navigator.share({title:'Ferry Navigator',text:result.from.name+' → '+result.to.name,url}).then(done).catch(()=>{});
@@ -638,7 +775,7 @@ function App(){
   }
 
   const inner=h('div',{style:{width:'100%',height:'100%',borderRadius:mobile?0:42,overflow:'hidden',background:'#0B0E11',position:'relative',color:'#EDF1F5',fontFamily:"'DM Sans',sans-serif"}},
-    screen==='plan'&&h(PlanScreen,{from,to,fromText,toText,fromSugs,toSugs,date,mode,timeMin,margin,now,loading,error,on}),
+    screen==='plan'&&h(PlanScreen,{from,to,via,fromText,toText,viaText,fromSugs,toSugs,viaSugs,showVia,date,mode,timeMin,margin,now,loading,error,recents,geoLoading,on}),
     screen==='results'&&result&&h(ResultsScreen,{results,selIdx,mode,margin,shared,on}),
     screen==='timetable'&&result&&h(TimetableScreen,{result,selectedFerry,now,on}),
     h(TabBar,{screen,hasResult:!!result,on})
