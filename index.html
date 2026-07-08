@@ -47,6 +47,76 @@ const h=React.createElement;
 
 const ACC='#2BD9D0',MUT='#7E8893',PANEL='#161B22',DEF_MARGIN=5;
 
+// ── i18n ───────────────────────────────────────────────────────────────────
+const STR={
+no:{
+  planTitle:'Plan tur',from:'Fra',to:'Til',via:'Via',addVia:'+ Legg til via-punkt',
+  placePH:'By, adresse, stoppested…',viaPH:'Innom sted…',myLoc:'Bruk min posisjon',
+  date:'Dato',departAt:'Avreise kl.',arriveBy:'Ankomst kl.',nowBtn:'Nå',
+  stepArr:'Ankomst',stepDep:'Avreise',
+  buffer:'Fergebuffer',bufferSub:'Ekstra tid for å nå fergen',
+  find:'Finn rute',finding:'⟳ Beregner rute…',
+  latestDep:'Avreise senest',plainDep:'Avreise',
+  arrivalWord:'ankomst',plusDay:' (+1 dag)',
+  ferriesN:n=>n+(n>1?' ferger':' ferge'),noFerryB:'Ingen ferge',withoutFerry:'Uten ferge',
+  bufferChip:m=>m+' min buffer',
+  timetables:'Rutetider',share:'Del',copied:'✓ Kopiert',
+  crossingL:m=>'Kryssing '+m+' min',next24:'Neste døgn',yourFerryMarked:'Din ferge markert',
+  yourFerry:'DIN FERGE',cancelledB:'INNSTILT',tomorrow:'I MORGEN',
+  noDeps:'Ingen avganger i dette tidsrommet',liveData:'LIVE RUTEDATA',
+  tabPlan:'Plan',tabRoute:'Rute',tabTimes:'Tider',tabNext:'Neste',
+  nextTitle:'Neste ferge',quayPH:'Søk fergekai…',inMin:m=>'om '+m+' min',
+  depart:'Avreise',drive:'Kjør',ferryW:'Ferge',minBuffer:'min buffer',minCrossing:'min kryssing',
+  thenDrive:'deretter kjør',arriveT:'Ankomst',done:'Reise fullført',
+  fareEst:'Fergetakst · estimat',
+  errNoRoute:'Ingen rute funnet',errGeneric:'Noe gikk galt – prøv igjen',
+  errPos:'Fikk ikke tilgang til posisjonen din',errPosSupport:'Posisjon støttes ikke i denne nettleseren',
+  errNotifDenied:'Varsler er blokkert i nettleseren',
+  notifTitle:'På tide å dra! ⛴',notifBody:t=>'Avreise '+t+' for å rekke fergen.',
+  viaLabel:'via'
+},
+en:{
+  planTitle:'Plan trip',from:'From',to:'To',via:'Via',addVia:'+ Add via point',
+  placePH:'City, address, stop…',viaPH:'Stop by…',myLoc:'Use my location',
+  date:'Date',departAt:'Depart at',arriveBy:'Arrive by',nowBtn:'Now',
+  stepArr:'Arrival',stepDep:'Departure',
+  buffer:'Ferry buffer',bufferSub:'Extra time to catch the ferry',
+  find:'Find route',finding:'⟳ Calculating route…',
+  latestDep:'Leave by',plainDep:'Departure',
+  arrivalWord:'arrival',plusDay:' (+1 day)',
+  ferriesN:n=>n+(n>1?' ferries':' ferry'),noFerryB:'No ferry',withoutFerry:'No ferry',
+  bufferChip:m=>m+' min buffer',
+  timetables:'Timetables',share:'Share',copied:'✓ Copied',
+  crossingL:m=>'Crossing '+m+' min',next24:'Next 24h',yourFerryMarked:'Your ferry highlighted',
+  yourFerry:'YOUR FERRY',cancelledB:'CANCELLED',tomorrow:'TOMORROW',
+  noDeps:'No departures in this period',liveData:'LIVE SCHEDULE',
+  tabPlan:'Plan',tabRoute:'Route',tabTimes:'Times',tabNext:'Next',
+  nextTitle:'Next ferry',quayPH:'Search ferry quay…',inMin:m=>'in '+m+' min',
+  depart:'Depart',drive:'Drive',ferryW:'Ferry',minBuffer:'min buffer',minCrossing:'min crossing',
+  thenDrive:'then drive',arriveT:'Arrive',done:'Journey complete',
+  fareEst:'Ferry fare · estimate',
+  errNoRoute:'No route found',errGeneric:'Something went wrong – try again',
+  errPos:'Could not access your location',errPosSupport:'Geolocation is not supported in this browser',
+  errNotifDenied:'Notifications are blocked in this browser',
+  notifTitle:'Time to leave! ⛴',notifBody:t=>'Leave at '+t+' to catch your ferry.',
+  viaLabel:'via'
+}};
+
+// Retry transient network/server errors with backoff — mobile networks flake
+async function fetchRetry(url,opts,tries){
+  tries=tries||3;
+  let lastErr;
+  for(let i=0;i<tries;i++){
+    try{
+      const r=await fetch(url,opts);
+      if(r.ok||r.status<500)return r;
+      lastErr=new Error('HTTP '+r.status);
+    }catch(e){lastErr=e;}
+    if(i<tries-1)await new Promise(res=>setTimeout(res,500*(i+1)));
+  }
+  throw lastErr;
+}
+
 // ── helpers ────────────────────────────────────────────────────────────────
 function pad(n){return(n<10?'0':'')+n;}
 function fmt(m){m=((Math.round(m)%1440)+1440)%1440;return pad(Math.floor(m/60))+':'+pad(m%60);}
@@ -121,10 +191,19 @@ async function searchPlaces(text){
   return(d.features||[]).map(f=>({name:f.properties.label||f.properties.name,lat:f.geometry.coordinates[1],lon:f.geometry.coordinates[0],id:f.properties.id}));
 }
 
+async function searchQuays(text){
+  const r=await fetch(`https://api.entur.io/geocoder/v1/autocomplete?text=${encodeURIComponent(text)}&lang=no&size=10&layers=venue`,{headers:{'ET-Client-Name':'ferrynav-app'}});
+  const d=await r.json();
+  return(d.features||[]).filter(f=>f.properties.id?.startsWith('NSR:')&&(
+    (f.properties.category||[]).join(' ').toLowerCase().includes('ferry')||
+    /ferje|ferge|kai|hurtigb/i.test(f.properties.name||'')
+  )).map(f=>({name:f.properties.label||f.properties.name,id:f.properties.id,lat:f.geometry.coordinates[1],lon:f.geometry.coordinates[0]}));
+}
+
 async function fetchOSRM(points,params){
   try{
     const cs=points.map(p=>p.lon+','+p.lat).join(';');
-    const r=await fetch(`https://router.project-osrm.org/route/v1/driving/${cs}?steps=true&geometries=geojson&overview=full&`+params);
+    const r=await fetchRetry(`https://router.project-osrm.org/route/v1/driving/${cs}?steps=true&geometries=geojson&overview=full&`+params);
     const d=await r.json();
     return d.code==='Ok'?(d.routes||[]):[];
   }catch(e){return [];}
@@ -140,7 +219,7 @@ async function routeOSRM(points){
   ]);
   let routes=main.length?main:(hasVia?[]:await fetchOSRM(points,'alternatives=true'));
   if(!routes.length&&noFerry.length)routes=noFerry.slice(0,1);
-  if(!routes.length)throw new Error('Ingen rute funnet');
+  if(!routes.length)throw new Error('NOROUTE');
   const dup=(a,b)=>Math.abs(a.duration-b.duration)<180&&Math.abs(a.distance-b.distance)<3000;
   const best=routes[0].duration;
   for(const nf of noFerry){
@@ -154,7 +233,7 @@ async function routeOSRM(points){
 
 async function findFerryStop(lat,lon,name){
   try{
-    const r=await fetch(`https://api.entur.io/geocoder/v1/reverse?point.lat=${lat}&point.lon=${lon}&size=10&layers=venue&boundary.circle.radius=3`,{headers:{'ET-Client-Name':'ferrynav-app'}});
+    const r=await fetchRetry(`https://api.entur.io/geocoder/v1/reverse?point.lat=${lat}&point.lon=${lon}&size=10&layers=venue&boundary.circle.radius=3`,{headers:{'ET-Client-Name':'ferrynav-app'}});
     const d=await r.json();
     const f=(d.features||[]).find(f=>f.properties.id?.startsWith('NSR:')&&(
       (f.properties.category||[]).join(' ').toLowerCase().includes('ferry')||
@@ -178,7 +257,7 @@ async function getFerryDeps(stopId,dateStr){
   // 48h window from the travel date so schedules work past midnight;
   // cancellation flags and service disruptions (situations) come along
   const q=`{stopPlace(id:"${stopId}"){situations{summary{value language}}estimatedCalls(startTime:"${dateStr}T00:00:00+02:00" timeRange:172800 numberOfDepartures:200 whiteListedModes:[water]){expectedDepartureTime cancellation}}}`;
-  const r=await fetch('https://api.entur.io/journey-planner/v3/graphql',{method:'POST',headers:{'Content-Type':'application/json','ET-Client-Name':'ferrynav-app'},body:JSON.stringify({query:q})});
+  const r=await fetchRetry('https://api.entur.io/journey-planner/v3/graphql',{method:'POST',headers:{'Content-Type':'application/json','ET-Client-Name':'ferrynav-app'},body:JSON.stringify({query:q})});
   const{data}=await r.json();
   const sp=data?.stopPlace;
   const deps=(sp?.estimatedCalls||[]).map(c=>({t:isoToMin(c.expectedDepartureTime,dateStr),cancelled:!!c.cancellation}))
@@ -197,7 +276,7 @@ function ferryFare(km){return Math.max(80,Math.round(60+km*20));}
 
 async function reverseAddress(lat,lon){
   try{
-    const r=await fetch(`https://api.entur.io/geocoder/v1/reverse?point.lat=${lat}&point.lon=${lon}&size=1&layers=address`,{headers:{'ET-Client-Name':'ferrynav-app'}});
+    const r=await fetchRetry(`https://api.entur.io/geocoder/v1/reverse?point.lat=${lat}&point.lon=${lon}&size=1&layers=address`,{headers:{'ET-Client-Name':'ferrynav-app'}});
     const d=await r.json();
     return d.features?.[0]?.properties?.label||null;
   }catch(e){return null;}
@@ -206,7 +285,8 @@ async function reverseAddress(lat,lon){
 // ── route planner ──────────────────────────────────────────────────────────
 function shortStop(n){return n?n.replace(/\s*(ferjekai|fergekai|ferjeleie|fergeleie|kai)\s*$/i,'').trim():null;}
 
-async function planOneRoute(osrmRoute,{from,to,via,date,timeMin,mode,margin}){
+async function planOneRoute(osrmRoute,{from,to,via,date,timeMin,mode,margin,lang}){
+  const S=STR[lang]||STR.no;
   const allSteps=osrmRoute.legs.flatMap(l=>l.steps);
 
   // Build drive/ferry segments from OSRM steps
@@ -260,29 +340,30 @@ async function planOneRoute(osrmRoute,{from,to,via,date,timeMin,mode,margin}){
   // Forward pass → steps
   let t=leaveBy;
   const steps=[];
-  steps.push({type:'depart',time:t,timeColor:'#EDF1F5',title:'Avreise '+from.name,
-    sub:'Kjør '+durFmt(DRIVES[0]?.dur||0)+' · '+(DRIVES[0]?.km||0)+' km',hasSub2:false,notLast:true,ferryIdx:null});
+  steps.push({type:'depart',time:t,timeColor:'#EDF1F5',title:S.depart+' '+from.name,
+    sub:S.drive+' '+durFmt(DRIVES[0]?.dur||0)+' · '+(DRIVES[0]?.km||0)+' km',hasSub2:false,notLast:true,ferryIdx:null});
   t+=DRIVES[0]?.dur||0;
 
-  const boarded=[];
+  const boarded=[],kaiArr=[];
   for(let i=0;i<FERRIES.length;i++){
     const F=FERRIES[i],dep=earliestDep(F.dep,t+margin),buf=dep-t;
+    kaiArr.push(t);
     boarded.push(dep);
     const nd=DRIVES[i+1];
-    steps.push({type:'ferry',time:dep,timeColor:'#37C2F0',title:'Ferge · '+F.name,
-      sub:buf+' min buffer · '+F.crossingMin+' min kryssing',
-      sub2:nd?.dur?'deretter kjør '+durFmt(nd.dur)+' · '+nd.km+' km':'',
+    steps.push({type:'ferry',time:dep,timeColor:'#37C2F0',title:S.ferryW+' · '+F.name,
+      sub:buf+' '+S.minBuffer+' · '+F.crossingMin+' '+S.minCrossing,
+      sub2:nd?.dur?S.thenDrive+' '+durFmt(nd.dur)+' · '+nd.km+' km':'',
       hasSub2:!!(nd?.dur),notLast:true,ferryIdx:i,alert:F.alerts[0]||null});
     t=dep+F.crossingMin+(nd?.dur||0);
   }
   const arrive=t;
-  steps.push({type:'arrive',time:arrive,timeColor:ACC,title:'Ankomst '+to.name,sub:'Reise fullført',hasSub2:false,notLast:false,ferryIdx:null});
+  steps.push({type:'arrive',time:arrive,timeColor:ACC,title:S.arriveT+' '+to.name,sub:S.done,hasSub2:false,notLast:false,ferryIdx:null});
 
   const ferryCost=FERRIES.reduce((s,f)=>s+f.fare,0);
   const totalKm=DRIVES.reduce((s,d)=>s+(d.km||0),0);
   return{leaveBy,arrive,total:arrive-leaveBy,distance:totalKm,numFerries:FERRIES.length,
-    cost:ferryCost,costBreak:FERRIES.length?'Fergetakst · estimat':'Uten ferge',
-    isFerry:FERRIES.length>0,boarded,steps,ferries:FERRIES,osrmRoute,osrmSteps:allSteps,from,to,
+    cost:ferryCost,costBreak:FERRIES.length?S.fareEst:S.withoutFerry,
+    isFerry:FERRIES.length>0,boarded,kaiArr,drives:DRIVES,steps,ferries:FERRIES,osrmRoute,osrmSteps:allSteps,from,to,
     viaPoint:via||null,
     via:osrmRoute.legs?.[0]?.summary||'',
     isLive:FERRIES.some(f=>f.isLive)};
@@ -294,10 +375,49 @@ async function planAlternatives(opts){
   const routes=await routeOSRM(points);
   const settled=await Promise.allSettled(routes.map(rt=>planOneRoute(rt,opts)));
   const out=settled.filter(s=>s.status==='fulfilled').map(s=>s.value);
-  if(!out.length)throw new Error('Ingen rute funnet');
+  if(!out.length)throw new Error('NOROUTE');
   // Best real-world option first: latest departure (arrive-by) or earliest arrival
   out.sort((a,b)=>opts.mode==='arrive'?b.leaveBy-a.leaveBy:a.arrive-b.arrive);
   return out;
+}
+
+// Re-anchor the whole schedule on one explicitly chosen ferry departure:
+// earlier ferries roll back (latest catchable), later ferries roll forward
+function rescheduleResult(R,anchor,margin,S){
+  const F=R.ferries,D=R.drives;
+  if(!F?.length||!D)return R;
+  const n=F.length,ai=Math.min(anchor.ferryIdx,n-1);
+  const boarded=new Array(n);
+  boarded[ai]=anchor.dep;
+  let t=anchor.dep-margin;
+  for(let i=ai-1;i>=0;i--){
+    t-=D[i+1]?.dur||0;
+    const dep=latestDep(F[i].dep,t-F[i].crossingMin);
+    boarded[i]=dep;t=dep-margin;
+  }
+  const leaveBy=boarded[0]-margin-(D[0]?.dur||0);
+  let tf=anchor.dep+F[ai].crossingMin;
+  for(let i=ai+1;i<n;i++){
+    tf+=D[i]?.dur||0;
+    const dep=earliestDep(F[i].dep,tf+margin);
+    boarded[i]=dep;tf=dep+F[i].crossingMin;
+  }
+  let tc=leaveBy;
+  const steps=[],kaiArr=[];
+  steps.push({type:'depart',time:tc,timeColor:'#EDF1F5',title:S.depart+' '+R.from.name,
+    sub:S.drive+' '+durFmt(D[0]?.dur||0)+' · '+(D[0]?.km||0)+' km',hasSub2:false,notLast:true,ferryIdx:null});
+  tc+=D[0]?.dur||0;
+  for(let i=0;i<n;i++){
+    const dep=boarded[i],buf=dep-tc,nd=D[i+1];
+    kaiArr.push(tc);
+    steps.push({type:'ferry',time:dep,timeColor:'#37C2F0',title:S.ferryW+' · '+F[i].name,
+      sub:buf+' '+S.minBuffer+' · '+F[i].crossingMin+' '+S.minCrossing,
+      sub2:nd?.dur?S.thenDrive+' '+durFmt(nd.dur)+' · '+nd.km+' km':'',
+      hasSub2:!!(nd?.dur),notLast:true,ferryIdx:i,alert:F[i].alerts[0]||null});
+    tc=dep+F[i].crossingMin+(nd?.dur||0);
+  }
+  steps.push({type:'arrive',time:tc,timeColor:ACC,title:S.arriveT+' '+R.to.name,sub:S.done,hasSub2:false,notLast:false,ferryIdx:null});
+  return{...R,leaveBy,arrive:tc,total:tc-leaveBy,boarded,kaiArr,steps};
 }
 
 // ── MapView ────────────────────────────────────────────────────────────────
@@ -350,8 +470,15 @@ function DataBadge({src}){
   return h('span',{style:{...s,color:MUT,background:PANEL}},'DEMO');
 }
 
+function LangToggle({lang,on}){
+  return h('div',{style:{display:'flex',gap:4}},
+    ['no','en'].map(l=>h('div',{key:l,onClick:()=>on('lang',l),
+      style:{padding:'3px 9px',borderRadius:8,fontSize:11,fontWeight:700,cursor:'pointer',letterSpacing:'.05em',
+        background:lang===l?PANEL:'transparent',color:lang===l?'#EDF1F5':'#3a444f'}},l.toUpperCase())));
+}
+
 // ── PlanScreen ─────────────────────────────────────────────────────────────
-function PlanScreen({from,to,via,fromText,toText,viaText,fromSugs,toSugs,viaSugs,showVia,date,mode,timeMin,margin,now,loading,error,recents,geoLoading,on}){
+function PlanScreen({from,to,via,fromText,toText,viaText,fromSugs,toSugs,viaSugs,showVia,date,mode,timeMin,margin,now,loading,error,recents,geoLoading,T,lang,on}){
   const fillPct=Math.round(margin/45*100)+'%';
   const trackBg=`linear-gradient(to right,${ACC} ${fillPct},#0B0E11 ${fillPct})`;
   const p=v=>({bg:margin===v?ACC:'#0B0E11',fg:margin===v?'#04181A':MUT});
@@ -364,12 +491,12 @@ function PlanScreen({from,to,via,fromText,toText,viaText,fromSugs,toSugs,viaSugs
     // status bar
     h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'calc(16px + env(safe-area-inset-top)) 26px 4px',fontFamily:"'JetBrains Mono',monospace",fontSize:13,fontWeight:600}},
       h('div',{style:{display:'flex',alignItems:'center',gap:6}},h('span',null,fmt(now)),h(DataBadge,{src:'live'})),
-      h('span',{style:{letterSpacing:2,color:MUT}},'●●●● ⌁ 84')
+      h(LangToggle,{lang,on})
     ),
     // header
     h('div',{style:{padding:'10px 24px 14px'}},
       h('div',{style:{fontSize:13,color:MUT,letterSpacing:'.04em'}},'Ferry Navigator'),
-      h('div',{style:{fontFamily:"'Space Grotesk',sans-serif",fontSize:30,fontWeight:700,letterSpacing:'-.02em'}},'Plan tur')
+      h('div',{style:{fontFamily:"'Space Grotesk',sans-serif",fontSize:30,fontWeight:700,letterSpacing:'-.02em'}},T.planTitle)
     ),
     h('div',{style:{padding:'0 20px',display:'flex',flexDirection:'column',gap:14}},
       // From / To
@@ -379,11 +506,11 @@ function PlanScreen({from,to,via,fromText,toText,viaText,fromSugs,toSugs,viaSugs
           h('div',{style:{display:'flex',alignItems:'center',gap:12}},
             h('div',{style:{width:11,height:11,borderRadius:'50%',border:'2.5px solid '+ACC,flex:'none'}}),
             h('div',{style:{flex:1,minWidth:0}},
-              h('div',{style:{fontSize:11,color:MUT,letterSpacing:'.08em',textTransform:'uppercase',marginBottom:3}},'Fra'),
-              h('input',{type:'text',value:fromText,placeholder:'By, adresse, stoppested…',onChange:e=>on('fromText',e.target.value),
+              h('div',{style:{fontSize:11,color:MUT,letterSpacing:'.08em',textTransform:'uppercase',marginBottom:3}},T.from),
+              h('input',{type:'text',value:fromText,placeholder:T.placePH,onChange:e=>on('fromText',e.target.value),
                 style:{width:'100%',background:'transparent',border:'none',outline:'none',color:'#EDF1F5',fontSize:16,fontWeight:600,fontFamily:"'Space Grotesk',sans-serif",padding:0}})
             ),
-            h('div',{onClick:geoLoading?null:()=>on('myLocation'),title:'Bruk min posisjon',
+            h('div',{onClick:geoLoading?null:()=>on('myLocation'),title:T.myLoc,
               style:{width:34,height:34,borderRadius:'50%',background:'#0B0E11',border:'1px solid #222A33',display:'flex',alignItems:'center',justifyContent:'center',fontSize:15,cursor:'pointer',flex:'none',marginRight:44,color:geoLoading?ACC:'#9aa3ad'}},
               geoLoading?'⟳':'⌖')
           ),
@@ -394,8 +521,8 @@ function PlanScreen({from,to,via,fromText,toText,viaText,fromSugs,toSugs,viaSugs
           h('div',{style:{display:'flex',alignItems:'center',gap:12}},
             h('div',{style:{width:10,height:10,background:'#EDB93B',transform:'rotate(45deg)',flex:'none',borderRadius:2}}),
             h('div',{style:{flex:1,minWidth:0}},
-              h('div',{style:{fontSize:11,color:MUT,letterSpacing:'.08em',textTransform:'uppercase',marginBottom:3}},'Via'),
-              h('input',{type:'text',value:viaText,placeholder:'Innom sted…',onChange:e=>on('viaText',e.target.value),
+              h('div',{style:{fontSize:11,color:MUT,letterSpacing:'.08em',textTransform:'uppercase',marginBottom:3}},T.via),
+              h('input',{type:'text',value:viaText,placeholder:T.viaPH,onChange:e=>on('viaText',e.target.value),
                 style:{width:'100%',background:'transparent',border:'none',outline:'none',color:'#EDF1F5',fontSize:16,fontWeight:600,fontFamily:"'Space Grotesk',sans-serif",padding:0}})
             ),
             h('div',{onClick:()=>on('removeVia'),style:{width:34,height:34,borderRadius:'50%',background:'#0B0E11',border:'1px solid #222A33',display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,cursor:'pointer',flex:'none',marginRight:44,color:'#9aa3ad'}},'✕')
@@ -407,15 +534,15 @@ function PlanScreen({from,to,via,fromText,toText,viaText,fromSugs,toSugs,viaSugs
           h('div',{style:{display:'flex',alignItems:'center',gap:12}},
             h('div',{style:{width:11,height:11,borderRadius:2,background:ACC,flex:'none'}}),
             h('div',{style:{flex:1,minWidth:0}},
-              h('div',{style:{fontSize:11,color:MUT,letterSpacing:'.08em',textTransform:'uppercase',marginBottom:3}},'Til'),
-              h('input',{type:'text',value:toText,placeholder:'By, adresse, stoppested…',onChange:e=>on('toText',e.target.value),
+              h('div',{style:{fontSize:11,color:MUT,letterSpacing:'.08em',textTransform:'uppercase',marginBottom:3}},T.to),
+              h('input',{type:'text',value:toText,placeholder:T.placePH,onChange:e=>on('toText',e.target.value),
                 style:{width:'100%',background:'transparent',border:'none',outline:'none',color:'#EDF1F5',fontSize:16,fontWeight:600,fontFamily:"'Space Grotesk',sans-serif",padding:0}})
             )
           ),
           toSugs.length>0&&h('div',{style:sugsStyle},toSugs.map((s,i)=>sugItem(s,i,()=>on('selectTo',s))))
         ),
         // Add via
-        !showVia&&h('div',{onClick:()=>on('addVia'),style:{padding:'2px 12px 10px 35px',fontSize:12,color:MUT,cursor:'pointer'}},'+ Legg til via-punkt'),
+        !showVia&&h('div',{onClick:()=>on('addVia'),style:{padding:'2px 12px 10px 35px',fontSize:12,color:MUT,cursor:'pointer'}},T.addVia),
         // Swap (hidden while via row is open to avoid overlap)
         !showVia&&h('div',{onClick:()=>on('swap'),style:{position:'absolute',right:16,top:'50%',transform:'translateY(-50%)',width:36,height:36,borderRadius:'50%',background:'#0B0E11',border:'1px solid #222A33',display:'flex',alignItems:'center',justifyContent:'center',color:'#9aa3ad',fontSize:16,cursor:'pointer',zIndex:2}},'⇅')
       ),
@@ -427,7 +554,7 @@ function PlanScreen({from,to,via,fromText,toText,viaText,fromSugs,toSugs,viaSugs
             style:{fontSize:17,color:r.fav?'#EDB93B':'#3a444f',flex:'none',width:26,textAlign:'center',lineHeight:1}},r.fav?'★':'☆'),
           h('div',{style:{flex:1,minWidth:0}},
             h('div',{style:{fontSize:13,fontWeight:600,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}},shortName(r.from.name)+' → '+shortName(r.to.name)),
-            r.via?h('div',{style:{fontSize:11,color:MUT}},'via '+shortName(r.via.name)):null
+            r.via?h('div',{style:{fontSize:11,color:MUT}},T.viaLabel+' '+shortName(r.via.name)):null
           ),
           h('div',{style:{color:MUT,fontSize:15,flex:'none'}},'›')
         ))
@@ -435,17 +562,18 @@ function PlanScreen({from,to,via,fromText,toText,viaText,fromSugs,toSugs,viaSugs
       // Date + mode
       h('div',{style:{background:PANEL,borderRadius:16,padding:'14px 16px',display:'flex',flexDirection:'column',gap:12}},
         h('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between'}},
-          h('span',{style:{fontSize:13,color:MUT}},'Dato'),
+          h('span',{style:{fontSize:13,color:MUT}},T.date),
           h('input',{type:'date',value:date,min:todayOslo(),onChange:e=>on('date',e.target.value),
             style:{background:'#0B0E11',color:'#EDF1F5',border:'1px solid #222A33',padding:'7px 12px',borderRadius:10,fontFamily:"'JetBrains Mono',monospace",fontSize:13,fontWeight:600,cursor:'pointer',outline:'none'}})
         ),
         h('div',{style:{display:'flex',background:'#0B0E11',borderRadius:12,padding:3,gap:3}},
-          h('div',{onClick:()=>on('setLeaveNow'),style:{flex:1,textAlign:'center',padding:9,borderRadius:10,fontSize:13,fontWeight:600,cursor:'pointer',background:mode==='leave'?ACC:'transparent',color:mode==='leave'?'#04181A':MUT}},'Reise nå'),
-          h('div',{onClick:()=>on('setArriveBy'),style:{flex:1,textAlign:'center',padding:9,borderRadius:10,fontSize:13,fontWeight:700,cursor:'pointer',background:mode==='arrive'?ACC:'transparent',color:mode==='arrive'?'#04181A':MUT}},'Ankomst kl.')
+          h('div',{onClick:()=>on('setLeaveAt'),style:{flex:1,textAlign:'center',padding:9,borderRadius:10,fontSize:13,fontWeight:600,cursor:'pointer',background:mode==='leave'?ACC:'transparent',color:mode==='leave'?'#04181A':MUT}},T.departAt),
+          h('div',{onClick:()=>on('setArriveBy'),style:{flex:1,textAlign:'center',padding:9,borderRadius:10,fontSize:13,fontWeight:700,cursor:'pointer',background:mode==='arrive'?ACC:'transparent',color:mode==='arrive'?'#04181A':MUT}},T.arriveBy)
         ),
-        mode==='arrive'&&h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center'}},
-          h('span',{style:{color:MUT,fontSize:13}},'Ankomst'),
-          h('div',{style:{display:'flex',alignItems:'center',gap:12}},
+        h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center'}},
+          h('span',{style:{color:MUT,fontSize:13}},mode==='arrive'?T.stepArr:T.stepDep),
+          h('div',{style:{display:'flex',alignItems:'center',gap:10}},
+            mode==='leave'&&h('div',{onClick:()=>on('timeNow'),style:{padding:'6px 13px',borderRadius:9,background:'#0B0E11',fontSize:12,fontWeight:700,cursor:'pointer',color:ACC}},T.nowBtn),
             h('div',{onClick:()=>on('timeMinus'),style:{width:32,height:32,borderRadius:'50%',background:'#0B0E11',display:'flex',alignItems:'center',justifyContent:'center',fontSize:18,cursor:'pointer'}},'−'),
             h('span',{style:{fontFamily:"'JetBrains Mono',monospace",fontSize:20,fontWeight:700,minWidth:56,textAlign:'center'}},fmt(timeMin)),
             h('div',{onClick:()=>on('timePlus'),style:{width:32,height:32,borderRadius:'50%',background:'#0B0E11',display:'flex',alignItems:'center',justifyContent:'center',fontSize:18,cursor:'pointer'}},'+')
@@ -455,10 +583,10 @@ function PlanScreen({from,to,via,fromText,toText,viaText,fromSugs,toSugs,viaSugs
       // Margin
       h('div',{style:{background:PANEL,borderRadius:20,padding:18}},
         h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center'}},
-          h('span',{style:{fontSize:14,fontWeight:600}},'Fergebuffer'),
+          h('span',{style:{fontSize:14,fontWeight:600}},T.buffer),
           h('span',{style:{fontFamily:"'JetBrains Mono',monospace",fontSize:18,fontWeight:700,color:ACC}},margin+' min')
         ),
-        h('div',{style:{fontSize:12,color:MUT,marginTop:4}},'Ekstra tid for å nå fergen'),
+        h('div',{style:{fontSize:12,color:MUT,marginTop:4}},T.bufferSub),
         h('div',{style:{display:'flex',gap:8,margin:'12px 0 14px'}},
           ...[0,5,10].map(v=>h('div',{key:v,onClick:()=>on('preset',v),style:{flex:1,textAlign:'center',padding:8,borderRadius:9,fontFamily:"'JetBrains Mono',monospace",fontSize:13,fontWeight:700,cursor:'pointer',background:p(v).bg,color:p(v).fg}},String(v)))
         ),
@@ -470,22 +598,22 @@ function PlanScreen({from,to,via,fromText,toText,viaText,fromSugs,toSugs,viaSugs
       h('div',{style:{paddingBottom:10}},
         h('div',{onClick:(!from||!to||loading)?null:()=>on('findRoute'),
           style:{background:from&&to&&!loading?ACC:'#1a2030',color:from&&to&&!loading?'#04181A':MUT,textAlign:'center',padding:17,borderRadius:18,fontSize:16,fontWeight:700,fontFamily:"'Space Grotesk',sans-serif",cursor:from&&to&&!loading?'pointer':'default',boxShadow:from&&to&&!loading?'0 8px 24px -6px rgba(43,217,208,.5)':'none'}},
-          loading?'⟳ Beregner rute…':'Finn rute')
+          loading?T.finding:T.find)
       )
     )
   );
 }
 
 // ── ResultsScreen ──────────────────────────────────────────────────────────
-function ResultsScreen({results,selIdx,mode,margin,shared,on}){
-  const R=results[selIdx];
+function ResultsScreen({results,selIdx,result,mode,margin,shared,notifAt,T,on}){
+  const R=result||results[selIdx];
   return h('div',{style:{position:'absolute',inset:0,display:'flex',flexDirection:'column'}},
     // Map
     h('div',{style:{position:'relative',height:272,flex:'none',overflow:'hidden'}},
       h(MapView,{results,selIdx,from:R.from,to:R.to,onSelect:i=>on('selAlt',i)}),
       h('div',{onClick:()=>on('back'),style:{position:'absolute',left:16,top:'calc(16px + env(safe-area-inset-top))',width:40,height:40,borderRadius:'50%',background:'rgba(11,14,17,.8)',backdropFilter:'blur(6px)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:20,border:'1px solid #222A33',cursor:'pointer',zIndex:400}},'‹'),
-      h('div',{style:{position:'absolute',right:16,top:'calc(16px + env(safe-area-inset-top))',padding:'7px 13px',borderRadius:30,background:'rgba(11,14,17,.8)',backdropFilter:'blur(6px)',fontSize:12,fontWeight:600,border:'1px solid #222A33',zIndex:400}},R.numFerries?R.numFerries+(R.numFerries>1?' ferger':' ferge'):'Ingen ferge'),
-      R.isLive&&h('div',{style:{position:'absolute',right:16,bottom:14,padding:'4px 10px',borderRadius:20,background:'rgba(43,217,208,.2)',border:'1px solid '+ACC,fontSize:10,fontWeight:700,color:ACC,zIndex:400,letterSpacing:'.06em'}},'LIVE RUTEDATA')
+      h('div',{style:{position:'absolute',right:16,top:'calc(16px + env(safe-area-inset-top))',padding:'7px 13px',borderRadius:30,background:'rgba(11,14,17,.8)',backdropFilter:'blur(6px)',fontSize:12,fontWeight:600,border:'1px solid #222A33',zIndex:400}},R.numFerries?T.ferriesN(R.numFerries):T.noFerryB),
+      R.isLive&&h('div',{style:{position:'absolute',right:16,bottom:14,padding:'4px 10px',borderRadius:20,background:'rgba(43,217,208,.2)',border:'1px solid '+ACC,fontSize:10,fontWeight:700,color:ACC,zIndex:400,letterSpacing:'.06em'}},T.liveData)
     ),
     // Bottom sheet
     h('div',{className:'scroll-hide',style:{flex:1,background:'#11151B',borderRadius:'26px 26px 0 0',marginTop:-22,position:'relative',padding:'8px 20px 0',display:'flex',flexDirection:'column',overflowY:'auto',zIndex:2}},
@@ -502,19 +630,19 @@ function ResultsScreen({results,selIdx,mode,margin,shared,on}){
               h('span',{style:{fontFamily:"'JetBrains Mono',monospace",fontSize:15,fontWeight:700,color:sel?ACC:'#EDF1F5'}},durFmt(r.total))
             ),
             h('div',{style:{fontSize:11,color:MUT,marginTop:2,whiteSpace:'nowrap'}},
-              (r.numFerries?r.numFerries+' ferge'+(r.numFerries>1?'r':''):'Uten ferge')+' · '+r.distance+' km'+(r.via?' · '+r.via:''))
+              (r.numFerries?T.ferriesN(r.numFerries):T.withoutFerry)+' · '+r.distance+' km'+(r.via?' · '+r.via:''))
           );
         })
       ),
-      h('div',{style:{fontSize:12,color:MUT,letterSpacing:'.06em',textTransform:'uppercase'}},mode==='arrive'?'Avreise senest':'Avreise'),
+      h('div',{style:{fontSize:12,color:MUT,letterSpacing:'.06em',textTransform:'uppercase'}},mode==='arrive'?T.latestDep:T.plainDep),
       h('div',{style:{display:'flex',alignItems:'baseline',gap:14}},
         h('div',{style:{fontFamily:"'JetBrains Mono',monospace",fontSize:46,fontWeight:700,letterSpacing:'-.02em',color:ACC}},fmt(R.leaveBy)),
-        h('div',{style:{color:MUT,fontSize:13,lineHeight:1.35}},'ankomst '+fmt(R.arrive)+(R.arrive>=1440?' (+1 dag)':''),h('br'),durFmt(R.total))
+        h('div',{style:{color:MUT,fontSize:13,lineHeight:1.35}},T.arrivalWord+' '+fmt(R.arrive)+(R.arrive>=1440?T.plusDay:''),h('br'),durFmt(R.total))
       ),
       h('div',{style:{display:'flex',gap:7,margin:'12px 0 10px',flexWrap:'wrap'}},
         h('span',{style:{padding:'6px 12px',borderRadius:30,background:PANEL,fontSize:12,fontWeight:600,fontFamily:"'JetBrains Mono',monospace"}},R.distance+' km'),
-        h('span',{style:{padding:'6px 12px',borderRadius:30,background:PANEL,fontSize:12,fontWeight:600}},R.numFerries?R.numFerries+(R.numFerries>1?' ferger':' ferge'):'Ingen ferge'),
-        h('span',{style:{padding:'6px 12px',borderRadius:30,background:'rgba(43,217,208,.12)',color:ACC,fontSize:12,fontWeight:600}},margin+' min buffer')
+        h('span',{style:{padding:'6px 12px',borderRadius:30,background:PANEL,fontSize:12,fontWeight:600}},R.numFerries?T.ferriesN(R.numFerries):T.noFerryB),
+        h('span',{style:{padding:'6px 12px',borderRadius:30,background:'rgba(43,217,208,.12)',color:ACC,fontSize:12,fontWeight:600}},T.bufferChip(margin))
       ),
       // Timeline
       h('div',{style:{paddingTop:4}},
@@ -531,7 +659,18 @@ function ResultsScreen({results,selIdx,mode,margin,shared,on}){
               h('div',{style:{fontSize:15,fontWeight:600,fontFamily:"'Space Grotesk',sans-serif"}},step.title),
               h('div',{style:{fontSize:12,color:MUT}},step.sub),
               step.hasSub2?h('div',{style:{fontSize:12,color:MUT,marginTop:1}},step.sub2):null,
-              step.alert?h('div',{style:{fontSize:11,color:'#EDB93B',background:'rgba(237,185,59,.1)',border:'1px solid rgba(237,185,59,.3)',borderRadius:8,padding:'6px 9px',marginTop:6}},'⚠ '+step.alert):null
+              step.alert?h('div',{style:{fontSize:11,color:'#EDB93B',background:'rgba(237,185,59,.1)',border:'1px solid rgba(237,185,59,.3)',borderRadius:8,padding:'6px 9px',marginTop:6}},'⚠ '+step.alert):null,
+              step.ferryIdx!=null?(()=>{
+                const Fx=R.ferries[step.ferryIdx],bd=R.boarded[step.ferryIdx];
+                const minT=(R.kaiArr||[])[step.ferryIdx]??bd;
+                const opts=Fx.dep.filter(d=>d>=minT).slice(0,4);
+                return opts.length>1?h('div',{style:{display:'flex',gap:6,marginTop:7,flexWrap:'wrap'}},
+                  opts.map(d=>h('div',{key:d,onClick:e=>{e.stopPropagation();on('pickDep',{ferryIdx:step.ferryIdx,dep:d});},
+                    style:{padding:'5px 11px',borderRadius:9,fontFamily:"'JetBrains Mono',monospace",fontSize:12,fontWeight:700,cursor:'pointer',
+                      background:d===bd?'rgba(55,194,240,.18)':'#161B22',color:d===bd?'#37C2F0':MUT,border:'1px solid '+(d===bd?'#37C2F0':'#222A33')}},
+                    fmt(d)+(d>=1440?' +1':'')))
+                ):null;
+              })():null
             )
           )
         ))
@@ -542,15 +681,16 @@ function ResultsScreen({results,selIdx,mode,margin,shared,on}){
           h('div',{style:{fontFamily:"'JetBrains Mono',monospace",fontSize:20,fontWeight:700}},R.numFerries?'≈'+R.cost+' kr':'0 kr'),
           h('div',{style:{fontSize:11,color:MUT}},R.costBreak)
         ),
-        h('div',{onClick:()=>on('share'),style:{padding:'14px 18px',borderRadius:16,background:PANEL,border:'1px solid '+(shared?ACC:'#222A33'),color:shared?ACC:'#EDF1F5',fontSize:14,fontWeight:700,fontFamily:"'Space Grotesk',sans-serif",cursor:'pointer',whiteSpace:'nowrap'}},shared?'✓ Kopiert':'Del'),
-        R.numFerries>0&&h('div',{onClick:()=>on('openTT',0),style:{padding:'14px 22px',borderRadius:16,background:ACC,color:'#04181A',fontSize:14,fontWeight:700,fontFamily:"'Space Grotesk',sans-serif",cursor:'pointer'}},'Rutetider')
+        ('Notification' in window)&&h('div',{onClick:()=>on('notify'),title:'Varsle før avreise',style:{padding:'14px 13px',borderRadius:16,background:PANEL,border:'1px solid '+(notifAt?ACC:'#222A33'),color:notifAt?ACC:'#EDF1F5',fontSize:14,fontWeight:700,fontFamily:"'JetBrains Mono',monospace",cursor:'pointer',whiteSpace:'nowrap'}},notifAt?'🔔 '+notifAt:'🔔'),
+        h('div',{onClick:()=>on('share'),style:{padding:'14px 18px',borderRadius:16,background:PANEL,border:'1px solid '+(shared?ACC:'#222A33'),color:shared?ACC:'#EDF1F5',fontSize:14,fontWeight:700,fontFamily:"'Space Grotesk',sans-serif",cursor:'pointer',whiteSpace:'nowrap'}},shared?T.copied:T.share),
+        R.numFerries>0&&h('div',{onClick:()=>on('openTT',0),style:{padding:'14px 22px',borderRadius:16,background:ACC,color:'#04181A',fontSize:14,fontWeight:700,fontFamily:"'Space Grotesk',sans-serif",cursor:'pointer'}},T.timetables)
       )
     )
   );
 }
 
 // ── TimetableScreen ────────────────────────────────────────────────────────
-function TimetableScreen({result,selectedFerry,now,on}){
+function TimetableScreen({result,selectedFerry,now,T,lang,on}){
   const F=result.ferries[selectedFerry];
   if(!F)return null;
   const boarded=result.boarded[selectedFerry];
@@ -562,57 +702,98 @@ function TimetableScreen({result,selectedFerry,now,on}){
   return h('div',{className:'scroll-hide',style:{position:'absolute',inset:0,overflowY:'auto',paddingBottom:'calc(84px + env(safe-area-inset-bottom))'}},
     h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'calc(16px + env(safe-area-inset-top)) 26px 4px',fontFamily:"'JetBrains Mono',monospace",fontSize:13,fontWeight:600}},
       h('div',{style:{display:'flex',alignItems:'center',gap:6}},h('span',null,fmt(now)),h(DataBadge,{src:F.isLive?'live':'demo'})),
-      h('span',{style:{letterSpacing:2,color:MUT}},'●●●● ⌁ 84')
+      h(LangToggle,{lang,on})
     ),
     h('div',{style:{padding:'8px 24px 0',display:'flex',alignItems:'center',gap:14}},
       h('div',{onClick:()=>on('backToResults'),style:{width:40,height:40,borderRadius:'50%',background:PANEL,display:'flex',alignItems:'center',justifyContent:'center',fontSize:20,cursor:'pointer'}},'‹'),
-      h('div',{style:{fontFamily:"'Space Grotesk',sans-serif",fontSize:22,fontWeight:700}},'Rutetider')
+      h('div',{style:{fontFamily:"'Space Grotesk',sans-serif",fontSize:22,fontWeight:700}},T.timetables)
     ),
     result.ferries.length>1&&h('div',{style:{display:'flex',gap:8,padding:'12px 24px 0',overflowX:'auto',className:'scroll-hide'}},
       result.ferries.map((f,i)=>h('div',{key:i,onClick:()=>on('setFerry',i),
         style:{flex:'0 0 auto',padding:'9px 14px',borderRadius:12,fontSize:12,fontWeight:700,cursor:'pointer',whiteSpace:'nowrap',background:selectedFerry===i?ACC:PANEL,color:selectedFerry===i?'#04181A':'#EDF1F5'}},f.name))
     ),
     h('div',{style:{padding:'10px 24px',display:'flex',gap:18,color:MUT,fontSize:12}},
-      h('span',null,'Kryssing '+F.crossingMin+' min'),
-      h('span',null,'Neste døgn'),
-      boarded!=null&&h('span',null,'Din ferge markert')
+      h('span',null,T.crossingL(F.crossingMin)),
+      h('span',null,T.next24),
+      boarded!=null&&h('span',null,T.yourFerryMarked)
     ),
     F.alerts?.length>0&&h('div',{style:{margin:'4px 20px 8px',padding:'10px 14px',borderRadius:12,background:'rgba(237,185,59,.1)',border:'1px solid rgba(237,185,59,.35)',fontSize:12,color:'#EDB93B',lineHeight:1.45}},
       F.alerts.slice(0,2).map((a,i)=>h('div',{key:i},'⚠ '+a))
     ),
     h('div',{style:{padding:'6px 20px 0',display:'flex',flexDirection:'column',gap:8}},
       items.length===0
-        ?h('div',{style:{textAlign:'center',padding:40,color:MUT}},'Ingen avganger i dette tidsrommet')
+        ?h('div',{style:{textAlign:'center',padding:40,color:MUT}},T.noDeps)
         :items.map((t,i)=>h('div',{key:i,style:{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'15px 18px',borderRadius:14,opacity:t.cancelled?.55:1,background:t.isB?'rgba(43,217,208,.12)':PANEL,border:'1px solid '+(t.isB?ACC:t.cancelled?'rgba(255,90,90,.35)':'#222A33')}},
           h('div',{style:{display:'flex',alignItems:'center',gap:14}},
             h('span',{style:{fontFamily:"'JetBrains Mono',monospace",fontSize:18,fontWeight:700,color:t.isB?ACC:'#EDF1F5',textDecoration:t.cancelled?'line-through':'none'}},t.time),
             h('span',{style:{fontSize:12,color:MUT}},'→ '+t.arr),
-            t.nextDay?h('span',{style:{fontSize:10,fontWeight:700,color:'#37C2F0',background:'rgba(55,194,240,.12)',padding:'2px 7px',borderRadius:8,letterSpacing:'.04em'}},'I MORGEN'):null
+            t.nextDay?h('span',{style:{fontSize:10,fontWeight:700,color:'#37C2F0',background:'rgba(55,194,240,.12)',padding:'2px 7px',borderRadius:8,letterSpacing:'.04em'}},T.tomorrow):null
           ),
-          t.cancelled?h('span',{style:{fontSize:12,fontWeight:700,color:'#FF6B6B'}},'INNSTILT')
-            :t.isB?h('span',{style:{fontSize:12,fontWeight:700,color:ACC}},'DIN FERGE'):null
+          t.cancelled?h('span',{style:{fontSize:12,fontWeight:700,color:'#FF6B6B'}},T.cancelledB)
+            :t.isB?h('span',{style:{fontSize:12,fontWeight:700,color:ACC}},T.yourFerry):null
+        ))
+    )
+  );
+}
+
+// ── NextFerryScreen ────────────────────────────────────────────────────────
+function NextFerryScreen({T,lang,now,nfText,nfSugs,nfStop,nfDeps,nfLoading,on}){
+  const deps=nfDeps?nfDeps.deps.filter(d=>d.t>=now-5&&d.t<=now+1440).slice(0,40):null;
+  return h('div',{className:'scroll-hide',style:{position:'absolute',inset:0,overflowY:'auto',paddingBottom:'calc(84px + env(safe-area-inset-bottom))'}},
+    h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'calc(16px + env(safe-area-inset-top)) 26px 4px',fontFamily:"'JetBrains Mono',monospace",fontSize:13,fontWeight:600}},
+      h('div',{style:{display:'flex',alignItems:'center',gap:6}},h('span',null,fmt(now)),h(DataBadge,{src:nfLoading?'loading':'live'})),
+      h(LangToggle,{lang,on})
+    ),
+    h('div',{style:{padding:'10px 24px 14px'}},
+      h('div',{style:{fontSize:13,color:MUT,letterSpacing:'.04em'}},'Ferry Navigator'),
+      h('div',{style:{fontFamily:"'Space Grotesk',sans-serif",fontSize:30,fontWeight:700,letterSpacing:'-.02em'}},T.nextTitle)
+    ),
+    h('div',{style:{padding:'0 20px',display:'flex',flexDirection:'column',gap:12}},
+      h('div',{style:{background:PANEL,borderRadius:16,padding:'12px 14px'}},
+        h('div',{style:{display:'flex',alignItems:'center',gap:10}},
+          h('span',{style:{fontSize:15}},'⛴'),
+          h('input',{type:'text',value:nfText,placeholder:T.quayPH,onChange:e=>on('nfText',e.target.value),
+            style:{flex:1,minWidth:0,background:'transparent',border:'none',outline:'none',color:'#EDF1F5',fontSize:16,fontWeight:600,fontFamily:"'Space Grotesk',sans-serif"}}),
+          nfText&&h('div',{onClick:()=>on('nfClear'),style:{color:MUT,cursor:'pointer',fontSize:14,padding:'0 4px'}},'✕')
+        ),
+        nfSugs.length>0&&h('div',{style:{marginTop:8,borderRadius:10,overflow:'hidden',border:'1px solid #222A33'}},
+          nfSugs.map((q,i)=>h('div',{key:q.id,onClick:()=>on('nfSelect',q),style:{padding:'11px 14px',cursor:'pointer',background:i%2?'#151b27':'#1a2030',fontSize:13}},q.name))
+        )
+      ),
+      nfLoading&&h('div',{style:{textAlign:'center',color:MUT,padding:20,fontSize:20}},'⟳'),
+      nfDeps&&nfDeps.alerts.length>0&&h('div',{style:{padding:'10px 14px',borderRadius:12,background:'rgba(237,185,59,.1)',border:'1px solid rgba(237,185,59,.35)',fontSize:12,color:'#EDB93B',lineHeight:1.45}},
+        nfDeps.alerts.slice(0,2).map((a,i)=>h('div',{key:i},'⚠ '+a))),
+      deps&&(deps.length===0
+        ?h('div',{style:{textAlign:'center',padding:30,color:MUT}},T.noDeps)
+        :h('div',{style:{display:'flex',flexDirection:'column',gap:8}},
+          deps.map((d,i)=>{
+            const dm=d.t-now,first=i===0&&!d.cancelled;
+            return h('div',{key:i,style:{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'14px 18px',borderRadius:14,opacity:d.cancelled?.55:1,background:first?'rgba(43,217,208,.12)':PANEL,border:'1px solid '+(d.cancelled?'rgba(255,90,90,.35)':first?ACC:'#222A33')}},
+              h('div',{style:{display:'flex',alignItems:'center',gap:12}},
+                h('span',{style:{fontFamily:"'JetBrains Mono',monospace",fontSize:18,fontWeight:700,textDecoration:d.cancelled?'line-through':'none',color:first?ACC:'#EDF1F5'}},fmt(d.t)),
+                d.t>=1440?h('span',{style:{fontSize:10,fontWeight:700,color:'#37C2F0',background:'rgba(55,194,240,.12)',padding:'2px 7px',borderRadius:8,letterSpacing:'.04em'}},T.tomorrow):null
+              ),
+              d.cancelled?h('span',{style:{fontSize:12,fontWeight:700,color:'#FF6B6B'}},T.cancelledB)
+                :dm>=0&&dm<600?h('span',{style:{fontSize:12,color:first?ACC:MUT,fontWeight:600}},T.inMin(dm)):null
+            );
+          })
         ))
     )
   );
 }
 
 // ── TabBar ─────────────────────────────────────────────────────────────────
-function TabBar({screen,hasResult,on}){
+function TabBar({screen,hasResult,T,on}){
   if(screen==='results')return null;
   const c=s=>s===screen?ACC:MUT;
+  const tab=(key,icon,label,cb)=>h('div',{onClick:cb,style:{flex:1,textAlign:'center',cursor:'pointer',color:c(key)}},
+    h('div',{style:{fontSize:20,lineHeight:1}},icon),
+    h('div',{style:{fontSize:11,fontWeight:600,marginTop:5}},label));
   return h('div',{style:{position:'absolute',left:0,right:0,bottom:0,height:'calc(74px + env(safe-area-inset-bottom))',background:'rgba(11,14,17,.92)',backdropFilter:'blur(12px)',borderTop:'1px solid #1c2027',display:'flex',alignItems:'flex-start',padding:'12px 30px 0'}},
-    h('div',{onClick:()=>on('tab','plan'),style:{flex:1,textAlign:'center',cursor:'pointer',color:c('plan')}},
-      h('div',{style:{fontSize:20,lineHeight:1}},'◎'),
-      h('div',{style:{fontSize:11,fontWeight:600,marginTop:5}},'Plan')
-    ),
-    hasResult&&h('div',{onClick:()=>on('tab','results'),style:{flex:1,textAlign:'center',cursor:'pointer',color:c('timetable')}},
-      h('div',{style:{fontSize:20,lineHeight:1}},'🗺'),
-      h('div',{style:{fontSize:11,fontWeight:600,marginTop:5}},'Rute')
-    ),
-    hasResult&&h('div',{onClick:()=>on('openTT',0),style:{flex:1,textAlign:'center',cursor:'pointer',color:c('timetable2')}},
-      h('div',{style:{fontSize:20,lineHeight:1}},'⛴'),
-      h('div',{style:{fontSize:11,fontWeight:600,marginTop:5}},'Tider')
-    )
+    tab('plan','◎',T.tabPlan,()=>on('tab','plan')),
+    tab('nextferry','⛴',T.tabNext,()=>on('tab','nextferry')),
+    hasResult&&tab('results','🗺',T.tabRoute,()=>on('tab','results')),
+    hasResult&&tab('timetable','🕒',T.tabTimes,()=>on('openTT',0))
   );
 }
 
@@ -631,6 +812,16 @@ function App(){
   const [showVia,setShowVia]=useState(false);
   const [recents,setRecents]=useState(loadRecents);
   const [geoLoading,setGeoLoading]=useState(false);
+  const [lang,setLang]=useState(()=>{try{return localStorage.getItem('fn_lang')==='en'?'en':'no';}catch(e){return 'no';}});
+  const [anchors,setAnchors]=useState({});
+  const [notifAt,setNotifAt]=useState(null);
+  const notifTimer=useRef(null);
+  const [nfText,setNfText]=useState('');
+  const [nfSugs,setNfSugs]=useState([]);
+  const [nfStop,setNfStop]=useState(null);
+  const [nfDeps,setNfDeps]=useState(null);
+  const [nfLoading,setNfLoading]=useState(false);
+  const T=STR[lang];
   const [date,setDate]=useState(todayOslo);
   const [mode,setMode]=useState('arrive');
   const [timeMin,setTimeMin]=useState(1080);
@@ -661,9 +852,9 @@ function App(){
     if(s.via){setVia(s.via);setViaText(s.via.name);setShowVia(true);}
     setDate(s.date);setMode(s.mode);setTimeMin(s.timeMin);setMargin(s.margin);
     setLoading(true);
-    planAlternatives({from:s.from,to:s.to,via:s.via,date:s.date,timeMin:s.mode==='leave'?nowMinutes():s.timeMin,mode:s.mode,margin:s.margin})
+    planAlternatives({from:s.from,to:s.to,via:s.via,date:s.date,timeMin:s.timeMin,mode:s.mode,margin:s.margin,lang:localStorage.getItem('fn_lang')==='en'?'en':'no'})
       .then(r=>{setResults(r);setSelIdx(0);setScreen('results');})
-      .catch(e=>setError(e.message||'Noe gikk galt'))
+      .catch(e=>setError(e.message==='NOROUTE'?STR.no.errNoRoute:STR.no.errGeneric))
       .finally(()=>setLoading(false));
   },[]);
 
@@ -685,7 +876,15 @@ function App(){
     return()=>clearTimeout(t);
   },[viaText,via]);
 
-  const result=results?results[selIdx]:null;
+  useEffect(()=>{
+    if(nfText.length<2||(nfStop&&nfStop.name===nfText)){setNfSugs([]);return;}
+    const t=setTimeout(()=>searchQuays(nfText).then(setNfSugs).catch(()=>{}),350);
+    return()=>clearTimeout(t);
+  },[nfText,nfStop]);
+
+  const baseResult=results?results[selIdx]:null;
+  const anchor=anchors[selIdx]||null;
+  const result=baseResult&&anchor?rescheduleResult(baseResult,anchor,margin,STR[lang]):baseResult;
 
   function addRecent(f,t,v){
     setRecents(prev=>{
@@ -703,10 +902,11 @@ function App(){
 
   function runPlan(f,t,v){
     setLoading(true);setError(null);
-    const actualTime=mode==='leave'?nowMinutes():timeMin;
-    planAlternatives({from:f,to:t,via:v||null,date,timeMin:actualTime,mode,margin})
-      .then(r=>{setResults(r);setSelIdx(0);setSelectedFerry(0);setScreen('results');addRecent(f,t,v);})
-      .catch(e=>setError(e.message||'Noe gikk galt'))
+    planAlternatives({from:f,to:t,via:v||null,date,timeMin,mode,margin,lang})
+      .then(r=>{setResults(r);setSelIdx(0);setSelectedFerry(0);setAnchors({});setNotifAt(null);
+        if(notifTimer.current){clearTimeout(notifTimer.current);notifTimer.current=null;}
+        setScreen('results');addRecent(f,t,v);})
+      .catch(e=>setError(e.message==='NOROUTE'?T.errNoRoute:T.errGeneric))
       .finally(()=>setLoading(false));
   }
 
@@ -721,13 +921,13 @@ function App(){
       case 'addVia': setShowVia(true);break;
       case 'removeVia': setVia(null);setViaText('');setViaSugs([]);setShowVia(false);break;
       case 'myLocation':{
-        if(!navigator.geolocation){setError('Posisjon støttes ikke i denne nettleseren');break;}
+        if(!navigator.geolocation){setError(T.errPosSupport);break;}
         setGeoLoading(true);setError(null);
         navigator.geolocation.getCurrentPosition(async pos=>{
           const lat=pos.coords.latitude,lon=pos.coords.longitude;
           const name=(await reverseAddress(lat,lon))||'Min posisjon';
           setFrom({name,lat,lon});setFromText(name);setFromSugs([]);setGeoLoading(false);
-        },()=>{setError('Fikk ikke tilgang til posisjonen din');setGeoLoading(false);},
+        },()=>{setError(T.errPos);setGeoLoading(false);},
         {enableHighAccuracy:true,timeout:10000});
         break;}
       case 'recent':{
@@ -748,9 +948,10 @@ function App(){
         break;}
       case 'swap':{const f=from,t2=to,ft=fromText,tt=toText;setFrom(t2);setTo(f);setFromText(tt);setToText(ft);setFromSugs([]);setToSugs([]);break;}
       case 'date': setDate(data);break;
-      case 'setLeaveNow': setMode('leave');break;
+      case 'setLeaveAt': setMode('leave');setTimeMin(Math.min(1410,Math.ceil(nowMinutes()/5)*5));break;
+      case 'timeNow': setTimeMin(Math.min(1410,Math.ceil(nowMinutes()/5)*5));break;
       case 'setArriveBy': setMode('arrive');break;
-      case 'timeMinus': setTimeMin(t=>Math.max(360,t-15));break;
+      case 'timeMinus': setTimeMin(t=>Math.max(0,t-15));break;
       case 'timePlus': setTimeMin(t=>Math.min(1410,t+15));break;
       case 'margin': setMargin(data);break;
       case 'preset': setMargin(data);break;
@@ -766,6 +967,38 @@ function App(){
           navigator.clipboard.writeText(url).then(done).catch(()=>{});
         }
         break;}
+      case 'lang':{setLang(data);try{localStorage.setItem('fn_lang',data);}catch(e){}break;}
+      case 'pickDep': setAnchors(a=>({...a,[selIdx]:data}));break;
+      case 'notify':{
+        if(!result||!('Notification' in window))break;
+        Notification.requestPermission().then(perm=>{
+          if(perm!=='granted'){setError(T.errNotifDenied);return;}
+          const lead=15,mins=result.leaveBy-lead;
+          const [Y,Mo,Dd]=date.split('-').map(Number);
+          const mm=((mins%1440)+1440)%1440;
+          const target=new Date(Y,Mo-1,Dd+Math.floor(mins/1440),Math.floor(mm/60),mm%60);
+          const fire=()=>{
+            const body=T.notifBody(fmt(result.leaveBy));
+            const show=()=>{try{new Notification(T.notifTitle,{body,icon:'icons/icon-192.png'});}catch(e){}};
+            if(navigator.serviceWorker)navigator.serviceWorker.ready.then(reg=>reg.showNotification(T.notifTitle,{body,icon:'icons/icon-192.png',badge:'icons/icon-192.png'})).catch(show);
+            else show();
+          };
+          const ms=target.getTime()-Date.now();
+          if(notifTimer.current)clearTimeout(notifTimer.current);
+          if(ms<=0){fire();setNotifAt(fmt(mins));return;}
+          notifTimer.current=setTimeout(fire,ms);
+          setNotifAt(fmt(mins));
+        });
+        break;}
+      case 'nfText': setNfText(data);setNfStop(null);break;
+      case 'nfSelect':{
+        setNfStop(data);setNfText(data.name);setNfSugs([]);setNfLoading(true);setNfDeps(null);
+        getFerryDeps(data.id,todayOslo())
+          .then(r=>setNfDeps(r))
+          .catch(()=>setNfDeps({deps:[],alerts:[]}))
+          .finally(()=>setNfLoading(false));
+        break;}
+      case 'nfClear': setNfText('');setNfStop(null);setNfSugs([]);setNfDeps(null);break;
       case 'back': setScreen('plan');break;
       case 'backToResults': setScreen('results');break;
       case 'openTT': if(result?.ferries?.length>0){setSelectedFerry(data||0);setScreen('timetable');}break;
@@ -775,10 +1008,11 @@ function App(){
   }
 
   const inner=h('div',{style:{width:'100%',height:'100%',borderRadius:mobile?0:42,overflow:'hidden',background:'#0B0E11',position:'relative',color:'#EDF1F5',fontFamily:"'DM Sans',sans-serif"}},
-    screen==='plan'&&h(PlanScreen,{from,to,via,fromText,toText,viaText,fromSugs,toSugs,viaSugs,showVia,date,mode,timeMin,margin,now,loading,error,recents,geoLoading,on}),
-    screen==='results'&&result&&h(ResultsScreen,{results,selIdx,mode,margin,shared,on}),
-    screen==='timetable'&&result&&h(TimetableScreen,{result,selectedFerry,now,on}),
-    h(TabBar,{screen,hasResult:!!result,on})
+    screen==='plan'&&h(PlanScreen,{from,to,via,fromText,toText,viaText,fromSugs,toSugs,viaSugs,showVia,date,mode,timeMin,margin,now,loading,error,recents,geoLoading,T,lang,on}),
+    screen==='results'&&result&&h(ResultsScreen,{results,selIdx,result,mode,margin,shared,notifAt,T,on}),
+    screen==='timetable'&&result&&h(TimetableScreen,{result,selectedFerry,now,T,lang,on}),
+    screen==='nextferry'&&h(NextFerryScreen,{T,lang,now,nfText,nfSugs,nfStop,nfDeps,nfLoading,on}),
+    h(TabBar,{screen,hasResult:!!result,T,on})
   );
 
   // Full screen on mobile; decorative phone frame on desktop
