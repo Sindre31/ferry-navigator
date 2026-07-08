@@ -113,11 +113,32 @@ async function searchPlaces(text){
   return(d.features||[]).map(f=>({name:f.properties.label||f.properties.name,lat:f.geometry.coordinates[1],lon:f.geometry.coordinates[0],id:f.properties.id}));
 }
 
+async function fetchOSRM(from,to,params){
+  try{
+    const r=await fetch(`https://router.project-osrm.org/route/v1/driving/${from.lon},${from.lat};${to.lon},${to.lat}?steps=true&geometries=geojson&overview=full&`+params);
+    const d=await r.json();
+    return d.code==='Ok'?(d.routes||[]):[];
+  }catch(e){return [];}
+}
+
 async function routeOSRM(from,to){
-  const r=await fetch(`https://router.project-osrm.org/route/v1/driving/${from.lon},${from.lat};${to.lon},${to.lat}?steps=true&geometries=geojson&overview=full&alternatives=true`);
-  const d=await r.json();
-  if(d.code!=='Ok'||!d.routes?.length)throw new Error('Ingen rute funnet');
-  return d.routes;
+  // Up to 3 alternatives, plus an explicit ferry-free route when one exists
+  const [main,noFerry]=await Promise.all([
+    fetchOSRM(from,to,'alternatives=3'),
+    fetchOSRM(from,to,'exclude=ferry')
+  ]);
+  let routes=main.length?main:await fetchOSRM(from,to,'alternatives=true');
+  if(!routes.length&&noFerry.length)routes=noFerry.slice(0,1);
+  if(!routes.length)throw new Error('Ingen rute funnet');
+  const dup=(a,b)=>Math.abs(a.duration-b.duration)<180&&Math.abs(a.distance-b.distance)<3000;
+  const best=routes[0].duration;
+  for(const nf of noFerry){
+    if(nf.legs.some(l=>l.steps.some(s=>s.mode==='ferry')))continue;
+    if(nf.duration>best*1.75)continue; // driving around takes far too long — not a realistic choice
+    if(routes.some(r=>dup(r,nf)))continue;
+    routes.push(nf);
+  }
+  return routes.slice(0,4);
 }
 
 async function findFerryStop(lat,lon,name){
@@ -236,6 +257,8 @@ async function planAlternatives(opts){
   const settled=await Promise.allSettled(routes.map(rt=>planOneRoute(rt,opts)));
   const out=settled.filter(s=>s.status==='fulfilled').map(s=>s.value);
   if(!out.length)throw new Error('Ingen rute funnet');
+  // Best real-world option first: latest departure (arrive-by) or earliest arrival
+  out.sort((a,b)=>opts.mode==='arrive'?b.leaveBy-a.leaveBy:a.arrive-b.arrive);
   return out;
 }
 
