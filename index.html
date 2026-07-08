@@ -1,9 +1,18 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="no">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Ferry Navigator</title>
+  <meta name="description" content="Planlegg bilturer med ferge i Norge – sanntids fergetider fra Entur">
+  <meta name="theme-color" content="#0B0E11">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="FerryNav">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -32,6 +41,7 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.min.js"></script>
 <script>
 'use strict';
+if('serviceWorker' in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));
 const {useState,useEffect,useRef}=React;
 const h=React.createElement;
 
@@ -53,6 +63,29 @@ function nowMinutes(){
 }
 
 function todayOslo(){return new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Oslo'}).format(new Date());}
+
+function buildShareUrl({from,to,date,mode,timeMin,margin}){
+  const p=new URLSearchParams();
+  p.set('fra',from.name);p.set('fra_p',from.lat.toFixed(5)+','+from.lon.toFixed(5));
+  p.set('til',to.name);p.set('til_p',to.lat.toFixed(5)+','+to.lon.toFixed(5));
+  p.set('dato',date);p.set('modus',mode);p.set('tid',String(timeMin));p.set('buffer',String(margin));
+  return location.origin+location.pathname+'?'+p.toString();
+}
+
+function parseShareUrl(){
+  const q=new URLSearchParams(location.search);
+  const fp=(q.get('fra_p')||'').split(','),tp=(q.get('til_p')||'').split(',');
+  if(!q.get('fra')||!q.get('til')||fp.length!==2||tp.length!==2)return null;
+  const from={name:q.get('fra'),lat:+fp[0],lon:+fp[1]};
+  const to={name:q.get('til'),lat:+tp[0],lon:+tp[1]};
+  if([from.lat,from.lon,to.lat,to.lon].some(isNaN))return null;
+  const mg=parseInt(q.get('buffer'),10);
+  return{from,to,
+    date:/^\d{4}-\d{2}-\d{2}$/.test(q.get('dato')||'')?q.get('dato'):todayOslo(),
+    mode:q.get('modus')==='leave'?'leave':'arrive',
+    timeMin:Math.min(1410,Math.max(0,parseInt(q.get('tid'),10)||1080)),
+    margin:isNaN(mg)?DEF_MARGIN:Math.min(45,Math.max(0,mg))};
+}
 
 function isoToMin(iso){
   try{
@@ -227,9 +260,9 @@ function PlanScreen({from,to,fromText,toText,fromSugs,toSugs,date,mode,timeMin,m
   const sugItem=(s,i,cb)=>h('div',{key:i,onClick:cb,style:{padding:'10px 14px',cursor:'pointer',background:i%2?'#151b27':'#1a2030',fontSize:13,color:'#EDF1F5',display:'flex',gap:8,alignItems:'center'}},
     h('span',{style:{color:MUT,fontSize:11}},'⌖'),s.name);
 
-  return h('div',{className:'scroll-hide',style:{position:'absolute',inset:0,overflowY:'auto',paddingBottom:84}},
+  return h('div',{className:'scroll-hide',style:{position:'absolute',inset:0,overflowY:'auto',paddingBottom:'calc(84px + env(safe-area-inset-bottom))'}},
     // status bar
-    h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'16px 26px 4px',fontFamily:"'JetBrains Mono',monospace",fontSize:13,fontWeight:600}},
+    h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'calc(16px + env(safe-area-inset-top)) 26px 4px',fontFamily:"'JetBrains Mono',monospace",fontSize:13,fontWeight:600}},
       h('div',{style:{display:'flex',alignItems:'center',gap:6}},h('span',null,fmt(now)),h(DataBadge,{src:'live'})),
       h('span',{style:{letterSpacing:2,color:MUT}},'●●●● ⌁ 84')
     ),
@@ -248,7 +281,7 @@ function PlanScreen({from,to,fromText,toText,fromSugs,toSugs,date,mode,timeMin,m
             h('div',{style:{flex:1}},
               h('div',{style:{fontSize:11,color:MUT,letterSpacing:'.08em',textTransform:'uppercase',marginBottom:3}},'Fra'),
               h('input',{type:'text',value:fromText,placeholder:'By, adresse, stoppested…',onChange:e=>on('fromText',e.target.value),
-                style:{width:'100%',background:'transparent',border:'none',outline:'none',color:'#EDF1F5',fontSize:15,fontWeight:600,fontFamily:"'Space Grotesk',sans-serif",padding:0}})
+                style:{width:'100%',background:'transparent',border:'none',outline:'none',color:'#EDF1F5',fontSize:16,fontWeight:600,fontFamily:"'Space Grotesk',sans-serif",padding:0}})
             )
           ),
           fromSugs.length>0&&h('div',{style:sugsStyle},fromSugs.map((s,i)=>sugItem(s,i,()=>on('selectFrom',s))))
@@ -260,7 +293,7 @@ function PlanScreen({from,to,fromText,toText,fromSugs,toSugs,date,mode,timeMin,m
             h('div',{style:{flex:1}},
               h('div',{style:{fontSize:11,color:MUT,letterSpacing:'.08em',textTransform:'uppercase',marginBottom:3}},'Til'),
               h('input',{type:'text',value:toText,placeholder:'By, adresse, stoppested…',onChange:e=>on('toText',e.target.value),
-                style:{width:'100%',background:'transparent',border:'none',outline:'none',color:'#EDF1F5',fontSize:15,fontWeight:600,fontFamily:"'Space Grotesk',sans-serif",padding:0}})
+                style:{width:'100%',background:'transparent',border:'none',outline:'none',color:'#EDF1F5',fontSize:16,fontWeight:600,fontFamily:"'Space Grotesk',sans-serif",padding:0}})
             )
           ),
           toSugs.length>0&&h('div',{style:sugsStyle},toSugs.map((s,i)=>sugItem(s,i,()=>on('selectTo',s))))
@@ -313,14 +346,14 @@ function PlanScreen({from,to,fromText,toText,fromSugs,toSugs,date,mode,timeMin,m
 }
 
 // ── ResultsScreen ──────────────────────────────────────────────────────────
-function ResultsScreen({result,mode,margin,on}){
+function ResultsScreen({result,mode,margin,shared,on}){
   const R=result;
   return h('div',{style:{position:'absolute',inset:0,display:'flex',flexDirection:'column'}},
     // Map
     h('div',{style:{position:'relative',height:272,flex:'none',overflow:'hidden'}},
       h(MapView,{osrmSteps:R.osrmSteps,osrmRoute:R.osrmRoute,from:R.from,to:R.to}),
-      h('div',{onClick:()=>on('back'),style:{position:'absolute',left:16,top:16,width:40,height:40,borderRadius:'50%',background:'rgba(11,14,17,.8)',backdropFilter:'blur(6px)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:20,border:'1px solid #222A33',cursor:'pointer',zIndex:400}},'‹'),
-      h('div',{style:{position:'absolute',right:16,top:16,padding:'7px 13px',borderRadius:30,background:'rgba(11,14,17,.8)',backdropFilter:'blur(6px)',fontSize:12,fontWeight:600,border:'1px solid #222A33',zIndex:400}},R.numFerries?R.numFerries+' ferger':'Ingen ferge'),
+      h('div',{onClick:()=>on('back'),style:{position:'absolute',left:16,top:'calc(16px + env(safe-area-inset-top))',width:40,height:40,borderRadius:'50%',background:'rgba(11,14,17,.8)',backdropFilter:'blur(6px)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:20,border:'1px solid #222A33',cursor:'pointer',zIndex:400}},'‹'),
+      h('div',{style:{position:'absolute',right:16,top:'calc(16px + env(safe-area-inset-top))',padding:'7px 13px',borderRadius:30,background:'rgba(11,14,17,.8)',backdropFilter:'blur(6px)',fontSize:12,fontWeight:600,border:'1px solid #222A33',zIndex:400}},R.numFerries?R.numFerries+' ferger':'Ingen ferge'),
       R.isLive&&h('div',{style:{position:'absolute',right:16,bottom:14,padding:'4px 10px',borderRadius:20,background:'rgba(43,217,208,.2)',border:'1px solid '+ACC,fontSize:10,fontWeight:700,color:ACC,zIndex:400,letterSpacing:'.06em'}},'LIVE RUTEDATA')
     ),
     // Bottom sheet
@@ -361,6 +394,7 @@ function ResultsScreen({result,mode,margin,on}){
           h('div',{style:{fontFamily:"'JetBrains Mono',monospace",fontSize:20,fontWeight:700}},R.cost+' kr'),
           h('div',{style:{fontSize:11,color:MUT}},R.costBreak)
         ),
+        h('div',{onClick:()=>on('share'),style:{padding:'14px 18px',borderRadius:16,background:PANEL,border:'1px solid '+(shared?ACC:'#222A33'),color:shared?ACC:'#EDF1F5',fontSize:14,fontWeight:700,fontFamily:"'Space Grotesk',sans-serif",cursor:'pointer',whiteSpace:'nowrap'}},shared?'✓ Kopiert':'Del'),
         R.numFerries>0&&h('div',{onClick:()=>on('openTT',0),style:{padding:'14px 22px',borderRadius:16,background:ACC,color:'#04181A',fontSize:14,fontWeight:700,fontFamily:"'Space Grotesk',sans-serif",cursor:'pointer'}},'Rutetider')
       )
     )
@@ -374,8 +408,8 @@ function TimetableScreen({result,selectedFerry,now,on}){
   const boarded=result.boarded[selectedFerry];
   const center=boarded!=null?boarded:now;
   const items=F.dep.filter(d=>d>=center-90&&d<=center+180).map(d=>({time:fmt(d),arr:fmt(d+F.crossingMin),isB:d===boarded}));
-  return h('div',{className:'scroll-hide',style:{position:'absolute',inset:0,overflowY:'auto',paddingBottom:84}},
-    h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'16px 26px 4px',fontFamily:"'JetBrains Mono',monospace",fontSize:13,fontWeight:600}},
+  return h('div',{className:'scroll-hide',style:{position:'absolute',inset:0,overflowY:'auto',paddingBottom:'calc(84px + env(safe-area-inset-bottom))'}},
+    h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'calc(16px + env(safe-area-inset-top)) 26px 4px',fontFamily:"'JetBrains Mono',monospace",fontSize:13,fontWeight:600}},
       h('div',{style:{display:'flex',alignItems:'center',gap:6}},h('span',null,fmt(now)),h(DataBadge,{src:F.isLive?'live':'demo'})),
       h('span',{style:{letterSpacing:2,color:MUT}},'●●●● ⌁ 84')
     ),
@@ -409,7 +443,7 @@ function TimetableScreen({result,selectedFerry,now,on}){
 function TabBar({screen,hasResult,on}){
   if(screen==='results')return null;
   const c=s=>s===screen?ACC:MUT;
-  return h('div',{style:{position:'absolute',left:0,right:0,bottom:0,height:74,background:'rgba(11,14,17,.92)',backdropFilter:'blur(12px)',borderTop:'1px solid #1c2027',display:'flex',alignItems:'flex-start',padding:'12px 30px 0'}},
+  return h('div',{style:{position:'absolute',left:0,right:0,bottom:0,height:'calc(74px + env(safe-area-inset-bottom))',background:'rgba(11,14,17,.92)',backdropFilter:'blur(12px)',borderTop:'1px solid #1c2027',display:'flex',alignItems:'flex-start',padding:'12px 30px 0'}},
     h('div',{onClick:()=>on('tab','plan'),style:{flex:1,textAlign:'center',cursor:'pointer',color:c('plan')}},
       h('div',{style:{fontSize:20,lineHeight:1}},'◎'),
       h('div',{style:{fontSize:11,fontWeight:600,marginTop:5}},'Plan')
@@ -443,20 +477,42 @@ function App(){
   const [error,setError]=useState(null);
   const [selectedFerry,setSelectedFerry]=useState(0);
   const [now,setNow]=useState(nowMinutes);
+  const [shared,setShared]=useState(false);
+  const [mobile,setMobile]=useState(()=>window.matchMedia('(max-width:520px)').matches);
+
+  useEffect(()=>{
+    const mq=window.matchMedia('(max-width:520px)');
+    const f=e=>setMobile(e.matches);
+    mq.addEventListener('change',f);
+    return()=>mq.removeEventListener('change',f);
+  },[]);
 
   useEffect(()=>{const id=setInterval(()=>setNow(nowMinutes()),60000);return()=>clearInterval(id);},[]);
 
+  // Open a shared link: prefill everything and plan the route immediately
   useEffect(()=>{
-    if(fromText.length<2){setFromSugs([]);return;}
-    const t=setTimeout(()=>searchPlaces(fromText).then(setFromSugs).catch(()=>{}),350);
-    return()=>clearTimeout(t);
-  },[fromText]);
+    const s=parseShareUrl();
+    if(!s)return;
+    setFrom(s.from);setTo(s.to);setFromText(s.from.name);setToText(s.to.name);
+    setDate(s.date);setMode(s.mode);setTimeMin(s.timeMin);setMargin(s.margin);
+    setLoading(true);
+    planRoute({from:s.from,to:s.to,date:s.date,timeMin:s.mode==='leave'?nowMinutes():s.timeMin,mode:s.mode,margin:s.margin})
+      .then(r=>{setResult(r);setScreen('results');})
+      .catch(e=>setError(e.message||'Noe gikk galt'))
+      .finally(()=>setLoading(false));
+  },[]);
 
   useEffect(()=>{
-    if(toText.length<2){setToSugs([]);return;}
+    if(fromText.length<2||(from&&from.name===fromText)){setFromSugs([]);return;}
+    const t=setTimeout(()=>searchPlaces(fromText).then(setFromSugs).catch(()=>{}),350);
+    return()=>clearTimeout(t);
+  },[fromText,from]);
+
+  useEffect(()=>{
+    if(toText.length<2||(to&&to.name===toText)){setToSugs([]);return;}
     const t=setTimeout(()=>searchPlaces(toText).then(setToSugs).catch(()=>{}),350);
     return()=>clearTimeout(t);
-  },[toText]);
+  },[toText,to]);
 
   function on(action,data){
     switch(action){
@@ -480,6 +536,16 @@ function App(){
           .catch(e=>setError(e.message||'Noe gikk galt'))
           .finally(()=>setLoading(false));
         break;}
+      case 'share':{
+        if(!result)break;
+        const url=buildShareUrl({from:result.from,to:result.to,date,mode,timeMin,margin});
+        const done=()=>{setShared(true);setTimeout(()=>setShared(false),2200);};
+        if(navigator.share){
+          navigator.share({title:'Ferry Navigator',text:result.from.name+' → '+result.to.name,url}).then(done).catch(()=>{});
+        }else if(navigator.clipboard){
+          navigator.clipboard.writeText(url).then(done).catch(()=>{});
+        }
+        break;}
       case 'back': setScreen('plan');break;
       case 'backToResults': setScreen('results');break;
       case 'openTT': if(result?.ferries?.length>0){setSelectedFerry(data||0);setScreen('timetable');}break;
@@ -488,15 +554,17 @@ function App(){
     }
   }
 
+  const inner=h('div',{style:{width:'100%',height:'100%',borderRadius:mobile?0:42,overflow:'hidden',background:'#0B0E11',position:'relative',color:'#EDF1F5',fontFamily:"'DM Sans',sans-serif"}},
+    screen==='plan'&&h(PlanScreen,{from,to,fromText,toText,fromSugs,toSugs,date,mode,timeMin,margin,now,loading,error,on}),
+    screen==='results'&&result&&h(ResultsScreen,{result,mode,margin,shared,on}),
+    screen==='timetable'&&result&&h(TimetableScreen,{result,selectedFerry,now,on}),
+    h(TabBar,{screen,hasResult:!!result,on})
+  );
+
+  // Full screen on mobile; decorative phone frame on desktop
+  if(mobile)return h('div',{style:{position:'fixed',inset:0,background:'#0B0E11'}},inner);
   return h('div',{style:{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',padding:24,background:'radial-gradient(120% 80% at 50% -10%,#0e1620 0%,#05070a 60%)'}},
-    h('div',{style:{width:390,height:844,borderRadius:52,background:'#0B0E11',boxShadow:'0 50px 100px -30px rgba(0,0,0,.8),0 0 0 1px rgba(255,255,255,.05)',padding:11,position:'relative'}},
-      h('div',{style:{width:'100%',height:'100%',borderRadius:42,overflow:'hidden',background:'#0B0E11',position:'relative',color:'#EDF1F5',fontFamily:"'DM Sans',sans-serif"}},
-        screen==='plan'&&h(PlanScreen,{from,to,fromText,toText,fromSugs,toSugs,date,mode,timeMin,margin,now,loading,error,on}),
-        screen==='results'&&result&&h(ResultsScreen,{result,mode,margin,on}),
-        screen==='timetable'&&result&&h(TimetableScreen,{result,selectedFerry,now,on}),
-        h(TabBar,{screen,hasResult:!!result,on})
-      )
-    )
+    h('div',{style:{width:390,height:844,borderRadius:52,background:'#0B0E11',boxShadow:'0 50px 100px -30px rgba(0,0,0,.8),0 0 0 1px rgba(255,255,255,.05)',padding:11,position:'relative'}},inner)
   );
 }
 
