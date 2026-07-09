@@ -77,6 +77,7 @@ no:{
   navCatch:(d,m)=>'Rekker '+d+'-fergen · '+m+' min margin',
   navMiss:(d,n)=>'Rekker ikke '+d+' · neste '+n,
   navGps:'Venter på GPS…',navEta:'ca. ankomst',navKmh:'km/t',navFerryIn:'til fergekaia',
+  lateWarn:m=>'⚠ Du ankommer kaia '+m+' min etter denne avgangen',
   errPos:'Fikk ikke tilgang til posisjonen din',errPosSupport:'Posisjon støttes ikke i denne nettleseren',
   viaLabel:'via'
 },
@@ -107,6 +108,7 @@ en:{
   navCatch:(d,m)=>'Catches the '+d+' ferry · '+m+' min margin',
   navMiss:(d,n)=>'Misses '+d+' · next '+n,
   navGps:'Waiting for GPS…',navEta:'est. arrival',navKmh:'km/h',navFerryIn:'to the ferry quay',
+  lateWarn:m=>'⚠ You reach the quay '+m+' min after this departure',
   errPos:'Could not access your location',errPosSupport:'Geolocation is not supported in this browser',
   viaLabel:'via'
 }};
@@ -571,40 +573,31 @@ async function planAlternatives(opts){
   return out.filter(r=>r.total<=bestTotal*1.4);
 }
 
-// Re-anchor the whole schedule on one explicitly chosen ferry departure:
-// earlier ferries roll back (latest catchable), later ferries roll forward
+// Re-anchor the schedule on one explicitly chosen ferry departure.
+// Ferry #1: the home departure time moves to match (leave-as-late-as-fits).
+// Later ferries: earlier legs stay untouched — picking a departure you
+// cannot reach keeps the plan but flags "you arrive X min too late".
 function rescheduleResult(R,anchor,margin,S,mode){
   const F=R.ferries,D=R.drives;
   if(!F?.length||!D)return R;
   const n=F.length,ai=Math.min(anchor.ferryIdx,n-1);
-  const boarded=new Array(n);
-  let leaveBy;
-  if(mode==='leave'){
-    // Departure time is what the user asked for — a later ferry just
-    // means more waiting at the quay, so the total grows
-    leaveBy=R.leaveBy;
-    let tc=leaveBy+(D[0]?.dur||0);
-    for(let i=0;i<n;i++){
-      const dep=i===ai?Math.max(anchor.dep,tc):earliestDep(F[i].dep,tc+(i<ai?0:margin));
-      boarded[i]=dep;
-      tc=dep+F[i].crossingMin+(D[i+1]?.dur||0);
-    }
+  const boarded=R.boarded.slice();
+  let leaveBy=R.leaveBy,lateBy=0;
+  boarded[ai]=anchor.dep;
+  if(ai===0){
+    leaveBy=anchor.dep-margin-(D[0]?.dur||0);
   }else{
-    boarded[ai]=anchor.dep;
-    let t=anchor.dep-margin;
-    for(let i=ai-1;i>=0;i--){
-      t-=D[i+1]?.dur||0;
-      const dep=latestDep(F[i].dep,t-F[i].crossingMin);
-      boarded[i]=dep;t=dep-margin;
-    }
-    leaveBy=boarded[0]-margin-(D[0]?.dur||0);
-    let tf=anchor.dep+F[ai].crossingMin;
-    for(let i=ai+1;i<n;i++){
-      tf+=D[i]?.dur||0;
-      const dep=earliestDep(F[i].dep,tf+margin);
-      boarded[i]=dep;tf=dep+F[i].crossingMin;
-    }
+    const arrKai=(R.kaiArr||[])[ai];
+    if(arrKai!=null&&anchor.dep<arrKai)lateBy=arrKai-anchor.dep;
   }
+  // legs after the anchored ferry roll forward
+  let tf=anchor.dep+F[ai].crossingMin;
+  for(let i=ai+1;i<n;i++){
+    tf+=D[i]?.dur||0;
+    boarded[i]=earliestDep(F[i].dep,tf+margin);
+    tf=boarded[i]+F[i].crossingMin;
+  }
+  // rebuild steps
   let tc=leaveBy;
   const steps=[],kaiArr=[];
   steps.push({type:'depart',time:tc,timeColor:'#EDF1F5',title:S.depart+' '+R.from.name,
@@ -614,9 +607,10 @@ function rescheduleResult(R,anchor,margin,S,mode){
     const dep=boarded[i],buf=dep-tc,nd=D[i+1];
     kaiArr.push(tc);
     steps.push({type:'ferry',time:dep,timeColor:'#37C2F0',title:S.ferryW+' · '+F[i].name,
-      sub:S.quayArr+' '+fmt(tc)+' · '+buf+' '+S.minBuffer+' · '+F[i].crossingMin+' '+S.minCrossing,
+      sub:S.quayArr+' '+fmt(tc)+' · '+Math.max(buf,0)+' '+S.minBuffer+' · '+F[i].crossingMin+' '+S.minCrossing,
       sub2:nd?.dur?S.thenDrive+' '+durFmt(nd.dur)+' · '+nd.km+' km':'',
-      hasSub2:!!(nd?.dur),notLast:true,ferryIdx:i,alert:F[i].alerts[0]||null});
+      hasSub2:!!(nd?.dur),notLast:true,ferryIdx:i,alert:F[i].alerts[0]||null,
+      warn:(i===ai&&lateBy>0)?S.lateWarn(lateBy):(buf<0?S.lateWarn(-buf):null)});
     tc=dep+F[i].crossingMin+(nd?.dur||0);
   }
   steps.push({type:'arrive',time:tc,timeColor:ACC,title:S.arriveT+' '+R.to.name,sub:S.done,hasSub2:false,notLast:false,ferryIdx:null});
@@ -889,20 +883,28 @@ function ResultsScreen({results,selIdx,result,mode,margin,timeMin,shared,vehicle
               h('div',{style:{fontSize:15,fontWeight:600,fontFamily:"'Space Grotesk',sans-serif"}},step.title),
               h('div',{style:{fontSize:12,color:MUT}},step.sub),
               step.hasSub2?h('div',{style:{fontSize:12,color:MUT,marginTop:1}},step.sub2):null,
+              step.warn?h('div',{style:{fontSize:11,color:'#FF6B6B',background:'rgba(255,107,107,.1)',border:'1px solid rgba(255,107,107,.35)',borderRadius:8,padding:'6px 9px',marginTop:6,fontWeight:600}},step.warn):null,
               step.alert?h('div',{style:{fontSize:11,color:'#EDB93B',background:'rgba(237,185,59,.1)',border:'1px solid rgba(237,185,59,.3)',borderRadius:8,padding:'6px 9px',marginTop:6}},'⚠ '+step.alert):null,
               step.ferryIdx!=null?(()=>{
                 // Options come from the base plan so earlier departures stay
-                // pickable after choosing a later one
+                // pickable after choosing a later one. A couple of earlier
+                // departures are included too — for ferry #1 that means
+                // leaving home earlier; for later ferries they get a warning.
                 const base=results[selIdx];
                 const Fx=base.ferries[step.ferryIdx],bd=R.boarded[step.ferryIdx];
                 const minT=(base.kaiArr||[])[step.ferryIdx]??bd;
-                const opts=Fx.dep.filter(d=>d>=minT).slice(0,4);
+                const opts=[...Fx.dep.filter(d=>d<minT).slice(-2),...Fx.dep.filter(d=>d>=minT).slice(0,4)];
                 if(!opts.includes(bd)){opts.push(bd);opts.sort((a,b)=>a-b);}
                 return opts.length>1?h('div',{style:{display:'flex',gap:6,marginTop:7,flexWrap:'wrap'}},
-                  opts.map(d=>h('div',{key:d,onClick:e=>{e.stopPropagation();on('pickDep',{ferryIdx:step.ferryIdx,dep:d});},
-                    style:{padding:'5px 11px',borderRadius:9,fontFamily:"'JetBrains Mono',monospace",fontSize:12,fontWeight:700,cursor:'pointer',
-                      background:d===bd?'rgba(55,194,240,.18)':'#161B22',color:d===bd?'#37C2F0':MUT,border:'1px solid '+(d===bd?'#37C2F0':'#222A33')}},
-                    fmt(d)+(d>=1440?' +1':'')))
+                  opts.map(d=>{
+                    const risky=step.ferryIdx>0&&d<minT;
+                    return h('div',{key:d,onClick:e=>{e.stopPropagation();on('pickDep',{ferryIdx:step.ferryIdx,dep:d});},
+                      style:{padding:'5px 11px',borderRadius:9,fontFamily:"'JetBrains Mono',monospace",fontSize:12,fontWeight:700,cursor:'pointer',
+                        background:d===bd?'rgba(55,194,240,.18)':'#161B22',
+                        color:d===bd?'#37C2F0':risky?'#EDB93B':MUT,
+                        border:'1px solid '+(d===bd?'#37C2F0':risky?'rgba(237,185,59,.45)':'#222A33')}},
+                      fmt(d)+(d>=1440?' +1':''));
+                  })
                 ):null;
               })():null
             )
