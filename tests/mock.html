@@ -1,0 +1,94 @@
+<script>
+(function(){
+  // Minimal Leaflet stub (CDN blocked in test env) — exercises MapView code paths
+  const layer={addTo(){return this;},on(){return this;},getBounds(){return {};},setLatLng(){return this;}};
+  window.L={
+    map:()=>({remove(){},fitBounds(){},setView(){},getZoom(){return 12;}}),
+    tileLayer:()=>Object.create(layer),
+    polyline:()=>Object.create(layer),
+    marker:()=>Object.create(layer),
+    divIcon:o=>{(window.__badges=window.__badges||[]).push(String(o.html||''));return o;},
+    latLngBounds:()=>({extend(){},isValid:()=>true}),
+  };
+  // Mock Google Maps Directions SDK
+  const LL=(lon,lat)=>({lat:()=>lat,lng:()=>lon});
+  const gStep=(mode,dur,dist,c1,c2)=>({maneuver:mode==='ferry'?'ferry':'',instructions:mode==='ferry'?'Ta fergen':'Kjør',
+    duration:{value:dur},distance:{value:dist},path:[LL(c1[0],c1[1]),LL(c2[0],c2[1])]});
+  const gInland={summary:'E39',overview_path:[LL(5.32,60.39),LL(5.53,61.11),LL(5.60,61.15),LL(6.15,62.47)],
+    legs:[{duration:{value:14400},distance:{value:230000},steps:[
+      gStep('drive',5400,90000,[5.32,60.39],[5.53,61.11]),
+      gStep('ferry',1200,5000,[5.53,61.11],[5.60,61.15]),
+      gStep('drive',7800,135000,[5.60,61.15],[6.15,62.47])]}]};
+  const gCoastal={summary:'Rv61',overview_path:[LL(5.32,60.39),LL(5.53,61.11),LL(5.60,61.15),LL(5.90,62.00),LL(6.15,62.47)],
+    legs:[{duration:{value:15600},distance:{value:200000},steps:[
+      gStep('drive',3600,60000,[5.32,60.39],[5.53,61.11]),
+      gStep('ferry',1500,6000,[5.53,61.11],[5.60,61.15]),
+      gStep('drive',6000,80000,[5.60,61.15],[5.60,61.15]),
+      gStep('ferry',900,4000,[5.60,61.15],[5.53,61.11]),
+      gStep('drive',3600,50000,[5.53,61.11],[6.15,62.47])]}]};
+  const gNoFerry={summary:'E16, Rv5',overview_path:[LL(5.32,60.39),LL(6.40,61.20),LL(6.15,62.47)],
+    legs:[{duration:{value:16800},distance:{value:310000},steps:[
+      gStep('drive',16800,310000,[5.32,60.39],[6.15,62.47])]}]};
+  window.google={maps:{TravelMode:{DRIVING:'DRIVING'},DirectionsService:function(){
+    this.route=(req,cb)=>setTimeout(()=>{
+      if(req.avoidFerries)return cb({routes:[gNoFerry]},'OK');
+      if(req.waypoints&&req.waypoints.length)return cb({routes:[gCoastal]},'OK');
+      if(req.provideRouteAlternatives)return cb({routes:[gInland,gCoastal]},'OK');
+      cb({routes:[gInland]},'OK');
+    },10);
+  }}};
+  const realFetch=window.fetch;
+  const iso=(day,h,m)=>`2026-07-${String(day).padStart(2,'0')}T${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:00+02:00`;
+  const deps=[];for(const day of[8,9])for(let t=6*60;t<=22*60;t+=40)deps.push({expectedDepartureTime:iso(day,Math.floor(t/60),t%60)});
+  window.fetch=function(url,opts){
+    url=String(url);
+    const json=o=>Promise.resolve(new Response(JSON.stringify(o),{status:200,headers:{'Content-Type':'application/json'}}));
+    if(url.includes('geocoder/v1/autocomplete')&&url.includes('layers=venue'))
+      return json({features:[{properties:{label:'Lavik ferjekai',name:'Lavik ferjekai',id:'NSR:StopPlace:1',category:['ferryStop']},geometry:{coordinates:[5.53,61.11]}}]});
+    if(url.includes('geocoder/v1/autocomplete'))
+      return json({features:[
+        {properties:{label:'Bergen, Vestland',name:'Bergen',id:'osm:1'},geometry:{coordinates:[5.32,60.39]}},
+        {properties:{label:'Ålesund, Møre og Romsdal',name:'Ålesund',id:'osm:2'},geometry:{coordinates:[6.15,62.47]}},
+        {properties:{label:'Førde, Sunnfjord',name:'Førde',id:'osm:3'},geometry:{coordinates:[5.85,61.45]}}
+      ]});
+    if(url.includes('geocoder/v1/reverse')){
+      if(url.includes('layers=address'))
+        return json({features:[{properties:{label:'Testveien 1, Bergen',id:'osm:addr'},geometry:{coordinates:[5.32,60.39]}}]});
+      const lavik=url.includes('point.lat=61.11');
+      return json({features:[{properties:{id:lavik?'NSR:StopPlace:1':'NSR:StopPlace:2',
+        name:lavik?'Lavik ferjekai':'Oppedal ferjekai',category:['ferryStop']},
+        geometry:{coordinates:lavik?[5.53,61.11]:[5.60,61.15]}}]});
+    }
+    if(url.includes('journey-planner')){
+      // stop 2 runs a different (60-min, offset) grid so multi-ferry
+      // connection quality varies through the day
+      const body=String((opts&&opts.body)||'');
+      const useAlt=body.includes('NSR:StopPlace:2');
+      const list=useAlt
+        ?(()=>{const a=[];for(const day of[8,9])for(let t=6*60+10;t<=22*60;t+=60)a.push({expectedDepartureTime:iso(day,Math.floor(t/60),t%60)});return a;})()
+        :deps;
+      return json({data:{stopPlace:{
+        situations:[{summary:[{value:'Redusert kapasitet på sambandet',language:'no'}]}],
+        estimatedCalls:list.map(d=>({expectedDepartureTime:d.expectedDepartureTime,
+          cancellation:d.expectedDepartureTime==='2026-07-08T16:00:00+02:00'}))
+      }}});
+    }
+    if(url.includes('router.project-osrm.org')){
+      const ferryRoute={duration:14400,distance:230000,
+        geometry:{coordinates:[[5.32,60.39],[5.53,61.11],[5.60,61.15],[6.15,62.47]]},
+        legs:[{summary:'E39',steps:[
+          {mode:'driving',duration:5400,distance:90000,geometry:{coordinates:[[5.32,60.39],[5.53,61.11]]}},
+          {mode:'ferry',name:'Lavik-Oppedal',duration:1200,distance:5000,geometry:{coordinates:[[5.53,61.11],[5.60,61.15]]}},
+          {mode:'driving',duration:7800,distance:135000,geometry:{coordinates:[[5.60,61.15],[6.15,62.47]]}}
+        ]}]};
+      const noFerryRoute={duration:16800,distance:310000,
+        geometry:{coordinates:[[5.32,60.39],[6.40,61.20],[6.15,62.47]]},
+        legs:[{summary:'E16, Rv5',steps:[
+          {mode:'driving',duration:16800,distance:310000,geometry:{coordinates:[[5.32,60.39],[6.40,61.20],[6.15,62.47]]}}
+        ]}]};
+      return json({code:'Ok',routes:url.includes('exclude=ferry')?[noFerryRoute]:[ferryRoute]});
+    }
+    return realFetch.apply(this,arguments);
+  };
+})();
+</script>

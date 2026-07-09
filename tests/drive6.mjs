@@ -1,0 +1,30 @@
+import { chromium } from '/opt/node22/lib/node_modules/playwright/index.mjs';
+const browser = await chromium.launch();
+const ctx = await browser.newContext({ viewport: { width: 390, height: 780 } });
+const p = await ctx.newPage();
+const errors = [];
+p.on('pageerror', e => errors.push(e.message));
+await p.goto('http://127.0.0.1:8741/index.html', { waitUntil: 'domcontentloaded' });
+await p.waitForSelector('input[type=text]');
+await p.locator('text=Ankomst kl.').click();
+const inputs = p.locator('input[type=text]');
+await inputs.nth(0).fill('Bergen');
+await p.locator('text=Bergen, Vestland').first().click();
+await inputs.nth(1).fill('Ålesund');
+await p.locator('text=Ålesund, Møre og Romsdal').first().click();
+await p.locator('text=Finn rute').click();
+await p.waitForSelector('text=Avreise senest', { timeout: 10000 });
+
+const getChips = () => p.$$eval('div', els => els.filter(e => e.children.length === 0 && /^\d\d:\d\d( \+1)?$/.test(e.textContent) && e.style.cursor === 'pointer' && e.style.fontSize === '12px').map(e => e.textContent));
+const getLeave = () => p.$$eval('div', els => els.find(e => e.style.fontSize === '46px').textContent);
+const clickChip = i => p.$$eval('div', (els, i) => { els.filter(e => e.children.length === 0 && /^\d\d:\d\d( \+1)?$/.test(e.textContent) && e.style.cursor === 'pointer' && e.style.fontSize === '12px')[i].click(); }, i);
+
+const chips0 = await getChips(); const leave0 = await getLeave();
+await clickChip(2); await p.waitForTimeout(400);
+const chips1 = await getChips(); const leave1 = await getLeave();
+console.log('pick later:', leave0, '→', leave1, '| chips stable:', JSON.stringify(chips0) === JSON.stringify(chips1) ? 'OK same options' : `FAIL ${chips0} vs ${chips1}`);
+await clickChip(0); await p.waitForTimeout(400);
+const leave2 = await getLeave();
+console.log('pick earlier again:', leave1, '→', leave2, leave2 === leave0 ? 'OK back to original' : 'FAIL');
+await ctx.close(); await browser.close();
+console.log(errors.length ? 'PAGE ERRORS:\n' + errors.join('\n') : 'no page errors');
