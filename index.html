@@ -556,24 +556,37 @@ async function planAlternatives(opts){
 
 // Re-anchor the whole schedule on one explicitly chosen ferry departure:
 // earlier ferries roll back (latest catchable), later ferries roll forward
-function rescheduleResult(R,anchor,margin,S){
+function rescheduleResult(R,anchor,margin,S,mode){
   const F=R.ferries,D=R.drives;
   if(!F?.length||!D)return R;
   const n=F.length,ai=Math.min(anchor.ferryIdx,n-1);
   const boarded=new Array(n);
-  boarded[ai]=anchor.dep;
-  let t=anchor.dep-margin;
-  for(let i=ai-1;i>=0;i--){
-    t-=D[i+1]?.dur||0;
-    const dep=latestDep(F[i].dep,t-F[i].crossingMin);
-    boarded[i]=dep;t=dep-margin;
-  }
-  const leaveBy=boarded[0]-margin-(D[0]?.dur||0);
-  let tf=anchor.dep+F[ai].crossingMin;
-  for(let i=ai+1;i<n;i++){
-    tf+=D[i]?.dur||0;
-    const dep=earliestDep(F[i].dep,tf+margin);
-    boarded[i]=dep;tf=dep+F[i].crossingMin;
+  let leaveBy;
+  if(mode==='leave'){
+    // Departure time is what the user asked for — a later ferry just
+    // means more waiting at the quay, so the total grows
+    leaveBy=R.leaveBy;
+    let tc=leaveBy+(D[0]?.dur||0);
+    for(let i=0;i<n;i++){
+      const dep=i===ai?Math.max(anchor.dep,tc):earliestDep(F[i].dep,tc+(i<ai?0:margin));
+      boarded[i]=dep;
+      tc=dep+F[i].crossingMin+(D[i+1]?.dur||0);
+    }
+  }else{
+    boarded[ai]=anchor.dep;
+    let t=anchor.dep-margin;
+    for(let i=ai-1;i>=0;i--){
+      t-=D[i+1]?.dur||0;
+      const dep=latestDep(F[i].dep,t-F[i].crossingMin);
+      boarded[i]=dep;t=dep-margin;
+    }
+    leaveBy=boarded[0]-margin-(D[0]?.dur||0);
+    let tf=anchor.dep+F[ai].crossingMin;
+    for(let i=ai+1;i<n;i++){
+      tf+=D[i]?.dur||0;
+      const dep=earliestDep(F[i].dep,tf+margin);
+      boarded[i]=dep;tf=dep+F[i].crossingMin;
+    }
   }
   let tc=leaveBy;
   const steps=[],kaiArr=[];
@@ -594,7 +607,7 @@ function rescheduleResult(R,anchor,margin,S){
 }
 
 // ── MapView ────────────────────────────────────────────────────────────────
-function MapView({results,selIdx,from,to,onSelect}){
+function MapView({results,selIdx,selTotal,from,to,onSelect}){
   const cRef=useRef(null),mRef=useRef(null);
   useEffect(()=>{
     if(!cRef.current||!window.L)return;
@@ -639,8 +652,11 @@ function MapView({results,selIdx,from,to,onSelect}){
       if(!pt)pt=g[Math.floor(g.length/2)];
       placedBadges.push([pt[1],pt[0]]);
       const seld=i===selIdx;
+      // Selected badge shows the derived total so picking another ferry
+      // departure updates the time on the map too
+      const tot=seld&&selTotal!=null?selTotal:R.total;
       const icon=L.divIcon({className:'',iconSize:null,iconAnchor:[26,13],
-        html:`<div style="padding:4px 10px;border-radius:20px;font:700 11px 'JetBrains Mono',monospace;white-space:nowrap;background:${seld?'#2BD9D0':'rgba(22,27,34,.95)'};color:${seld?'#04181A':'#EDF1F5'};border:1px solid ${seld?'#2BD9D0':'#3a444f'};box-shadow:0 2px 8px rgba(0,0,0,.5);">${durFmt(R.total)}${R.numFerries?' ⛴':''}</div>`});
+        html:`<div style="padding:4px 10px;border-radius:20px;font:700 11px 'JetBrains Mono',monospace;white-space:nowrap;background:${seld?'#2BD9D0':'rgba(22,27,34,.95)'};color:${seld?'#04181A':'#EDF1F5'};border:1px solid ${seld?'#2BD9D0':'#3a444f'};box-shadow:0 2px 8px rgba(0,0,0,.5);">${durFmt(tot)}${R.numFerries?' ⛴':''}</div>`});
       const lm=L.marker([pt[1],pt[0]],{icon}).addTo(map);
       lm.on('click',()=>onSelect(i));
     });
@@ -652,7 +668,7 @@ function MapView({results,selIdx,from,to,onSelect}){
     if(bounds.isValid())map.fitBounds(bounds,{padding:[28,28]});
     mRef.current=map;
     return()=>{if(mRef.current){mRef.current.remove();mRef.current=null;}};
-  },[results,selIdx,from,to]);
+  },[results,selIdx,selTotal,from,to]);
   return h('div',{ref:cRef,style:{width:'100%',height:'100%'}});
 }
 
@@ -804,7 +820,7 @@ function ResultsScreen({results,selIdx,result,mode,margin,timeMin,shared,vehicle
   return h('div',{style:{position:'absolute',inset:0,display:'flex',flexDirection:'column'}},
     // Map
     h('div',{style:{position:'relative',height:272,flex:'none',overflow:'hidden'}},
-      h(MapView,{results,selIdx,from:R.from,to:R.to,onSelect:i=>on('selAlt',i)}),
+      h(MapView,{results,selIdx,selTotal:R.total,from:R.from,to:R.to,onSelect:i=>on('selAlt',i)}),
       h('div',{onClick:()=>on('back'),style:{position:'absolute',left:16,top:'calc(16px + env(safe-area-inset-top))',width:40,height:40,borderRadius:'50%',background:'rgba(11,14,17,.8)',backdropFilter:'blur(6px)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:20,border:'1px solid #222A33',cursor:'pointer',zIndex:400}},'‹'),
       h('div',{style:{position:'absolute',right:16,top:'calc(16px + env(safe-area-inset-top))',padding:'7px 13px',borderRadius:30,background:'rgba(11,14,17,.8)',backdropFilter:'blur(6px)',fontSize:12,fontWeight:600,border:'1px solid #222A33',zIndex:400}},R.numFerries?T.ferriesN(R.numFerries):T.noFerryB),
       R.isLive&&h('div',{style:{position:'absolute',right:16,bottom:14,padding:'4px 10px',borderRadius:20,background:'rgba(43,217,208,.2)',border:'1px solid '+ACC,fontSize:10,fontWeight:700,color:ACC,zIndex:400,letterSpacing:'.06em'}},T.liveData)
@@ -1091,7 +1107,7 @@ function App(){
 
   const baseResult=results?results[selIdx]:null;
   const anchor=anchors[selIdx]||null;
-  const result=baseResult&&anchor?rescheduleResult(baseResult,anchor,margin,STR[lang]):baseResult;
+  const result=baseResult&&anchor?rescheduleResult(baseResult,anchor,margin,STR[lang],mode):baseResult;
 
   function addRecent(f,t){
     setRecents(prev=>{
