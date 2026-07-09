@@ -79,6 +79,7 @@ no:{
   navCatch:(d,m)=>'Rekker '+d+'-fergen · '+m+' min margin',
   navMiss:(d,n)=>'Rekker ikke '+d+' · neste '+n,
   navGps:'Venter på GPS…',navEta:'ca. ankomst',navKmh:'km/t',navFerryIn:'til fergekaia',
+  navReroute:'⟳ Omruter fra din posisjon…',myLocName:'Min posisjon',
   lateWarn:m=>'⚠ Du ankommer kaia '+m+' min etter denne avgangen',
   tightWarn:m=>'⚠ Dårlig tid – bare '+m+' min margin på kaia',
   bestTimes:'Beste avreisetider',bestBadge:'BEST',bestHint:'Fergene korresponderer best på de grønne tidspunktene',
@@ -112,6 +113,7 @@ en:{
   navCatch:(d,m)=>'Catches the '+d+' ferry · '+m+' min margin',
   navMiss:(d,n)=>'Misses '+d+' · next '+n,
   navGps:'Waiting for GPS…',navEta:'est. arrival',navKmh:'km/h',navFerryIn:'to the ferry quay',
+  navReroute:'⟳ Rerouting from your position…',myLocName:'My position',
   lateWarn:m=>'⚠ You reach the quay '+m+' min after this departure',
   tightWarn:m=>'⚠ Tight – only '+m+' min margin at the quay',
   bestTimes:'Best departure times',bestBadge:'BEST',bestHint:'Ferry connections align best at the green times',
@@ -233,6 +235,16 @@ function buildShareUrl({from,to,via,date,mode,timeMin,margin,vehicle}){
   p.set('dato',date);p.set('modus',mode);p.set('tid',String(timeMin));p.set('buffer',String(margin));
   if(vehicle&&vehicle!=='car')p.set('kjt',vehicle);
   return location.origin+location.pathname+'?'+p.toString();
+}
+
+// Active plan survives reloads and offline periods (12h shelf life)
+function savePlan(obj){try{localStorage.setItem('fn_plan',JSON.stringify({...obj,ts:Date.now()}));}catch(e){}}
+function loadPlan(){
+  try{
+    const p=JSON.parse(localStorage.getItem('fn_plan')||'null');
+    if(!p||!p.results?.length||Date.now()-p.ts>12*3600e3)return null;
+    return p;
+  }catch(e){return null;}
 }
 
 function loadRecents(){try{const r=JSON.parse(localStorage.getItem('fn_recents')||'[]');return Array.isArray(r)?r.filter(x=>x.fav):[];}catch(e){return[];}}
@@ -459,6 +471,28 @@ async function getFerryDeps(stopId,dateStr){
   return{deps,alerts};
 }
 
+// Live ferry positions from Entur's realtime vehicles API (open, no key)
+async function fetchVessels(b){
+  try{
+    const q=`{vehicles(boundingBox:{minLat:${b.minLat},minLon:${b.minLon},maxLat:${b.maxLat},maxLon:${b.maxLon}}){vehicleId mode lastUpdated location{latitude longitude} line{lineRef}}}`;
+    const r=await fetch('https://api.entur.io/realtime/v2/vehicles/graphql',{method:'POST',headers:{'Content-Type':'application/json','ET-Client-Name':'ferrynav-app'},body:JSON.stringify({query:q})});
+    const d=await r.json();
+    return(d?.data?.vehicles||[]).filter(v=>v?.location&&/water|ferry/i.test(String(v.mode||'')));
+  }catch(e){return[];}
+}
+
+// Bounding box around a route's ferry crossings, padded
+function ferryBBox(steps){
+  const lats=[],lons=[];
+  (steps||[]).forEach(st=>{
+    if(st.mode!=='ferry'||!st.geometry?.coordinates?.length)return;
+    st.geometry.coordinates.forEach(c=>{lats.push(c[1]);lons.push(c[0]);});
+  });
+  if(!lats.length)return null;
+  return{minLat:Math.min(...lats)-0.03,maxLat:Math.max(...lats)+0.03,
+         minLon:Math.min(...lons)-0.05,maxLon:Math.max(...lons)+0.05};
+}
+
 // Estimated AutoPASS car fare from crossing length (linear fit against
 // published fares, e.g. Lavik–Oppedal ~5.6km→~172, Moss–Horten ~10km→~260).
 // Vehicle multipliers approximate the fare-group ratios in the regulativ.
@@ -610,6 +644,44 @@ function bestDepartures(R,margin){
   return out.map(x=>({...x,best:x.total<=min+10}));
 }
 
+// Recompute leave-by/boarded/steps for a result whose ferry schedules
+// were refreshed — same rules as the original plan, no API calls
+function scheduleResult(R,{timeMin,mode,margin,lang}){
+  const S=STR[lang]||STR.no,F=R.ferries,D=R.drives;
+  if(!F?.length||!D)return R;
+  const n=F.length;
+  let leaveBy;
+  if(mode==='arrive'){
+    let t=timeMin;
+    for(let i=n-1;i>=0;i--){
+      t-=D[i+1]?.dur||0;
+      t=latestDep(F[i].dep,t-F[i].crossingMin)-margin;
+    }
+    leaveBy=t-(D[0]?.dur||0);
+  }else{
+    const dep1=earliestDep(F[0].dep,timeMin+(D[0]?.dur||0)+margin);
+    leaveBy=Math.max(timeMin,dep1-margin-(D[0]?.dur||0));
+  }
+  let tc=leaveBy;
+  const boarded=[],kaiArr=[],steps=[];
+  steps.push({type:'depart',time:tc,timeColor:'var(--txt)',title:S.depart+' '+R.from.name,
+    sub:S.drive+' '+durFmt(D[0]?.dur||0)+' · '+(D[0]?.km||0)+' km',hasSub2:false,notLast:true,ferryIdx:null});
+  tc+=D[0]?.dur||0;
+  for(let i=0;i<n;i++){
+    const dep=earliestDep(F[i].dep,tc+margin),buf=dep-tc,nd=D[i+1];
+    kaiArr.push(tc);boarded.push(dep);
+    steps.push({type:'ferry',time:dep,timeColor:'var(--ferry)',title:S.ferryW+' · '+F[i].name,
+      sub:S.quayArr+' '+fmt(tc)+' · '+Math.max(buf,0)+' '+S.minBuffer+' · '+F[i].crossingMin+' '+S.minCrossing,
+      sub2:nd?.dur?S.thenDrive+' '+durFmt(nd.dur)+' · '+nd.km+' km':'',
+      hasSub2:!!(nd?.dur),notLast:true,ferryIdx:i,alert:F[i].alerts[0]||null,
+      tight:buf>=0&&buf<margin?S.tightWarn(buf):null});
+    tc=dep+F[i].crossingMin+(nd?.dur||0);
+  }
+  steps.push({type:'arrive',time:tc,timeColor:'var(--acc)',title:S.arriveT+' '+R.to.name,sub:S.done,hasSub2:false,notLast:false,ferryIdx:null});
+  return{...R,leaveBy,arrive:tc,total:tc-leaveBy,boarded,kaiArr,steps,
+    reqLeave:mode==='leave'?timeMin:null,isLive:F.some(f=>f.isLive)};
+}
+
 // Re-anchor the schedule on one explicitly chosen ferry departure.
 // Ferry #1: the home departure time moves to match (leave-as-late-as-fits).
 // Later ferries: earlier legs stay untouched — picking a departure you
@@ -719,8 +791,23 @@ function MapView({results,selIdx,selTotal,from,to,theme,onSelect}){
     if(viaPoint){L.marker([viaPoint.lat,viaPoint.lon],{icon:mk('var(--amber)','var(--amber)')}).addTo(map);bounds.extend([viaPoint.lat,viaPoint.lon]);}
     if(to){L.marker([to.lat,to.lon],{icon:mk(ACC,ACC)}).addTo(map);bounds.extend([to.lat,to.lon]);}
     if(bounds.isValid())map.fitBounds(bounds,{padding:[28,28]});
+    // live ferry vessels on the selected route's crossings
+    let vessels=[],vTimer=null;
+    const bbox=ferryBBox(sel?.osrmSteps);
+    if(bbox){
+      const draw=async()=>{
+        const vs=await fetchVessels(bbox);
+        if(!mRef.current)return;
+        vessels.forEach(mk2=>{try{map.removeLayer(mk2);}catch(e){}});
+        vessels=vs.map(v=>L.marker([v.location.latitude,v.location.longitude],{zIndexOffset:900,
+          icon:L.divIcon({className:'',iconSize:[22,22],iconAnchor:[11,11],
+            html:`<div data-vessel style="width:22px;height:22px;border-radius:50%;background:${mFer};display:flex;align-items:center;justify-content:center;font-size:12px;border:2px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.4);">⛴</div>`})}).addTo(map));
+      };
+      draw();
+      vTimer=setInterval(draw,20000);
+    }
     mRef.current=map;
-    return()=>{if(mRef.current){mRef.current.remove();mRef.current=null;}};
+    return()=>{if(vTimer)clearInterval(vTimer);if(mRef.current){mRef.current.remove();mRef.current=null;}};
   },[results,selIdx,selTotal,from,to,theme]);
   return h('div',{ref:cRef,style:{width:'100%',height:'100%'}});
 }
@@ -1093,14 +1180,16 @@ function NextFerryScreen({T,lang,now,nfText,nfSugs,nfStop,nfDeps,nfLoading,theme
 }
 
 // ── NavScreen: live navigation along the planned route ────────────────────
-function NavScreen({R,now,T,on}){
+function NavScreen({R,now,margin,lang,T,on}){
   const [pos,setPos]=useState(null);
   const [navErr,setNavErr]=useState(null);
   const [follow,setFollow]=useState(true);
-  const cRef=useRef(null),mRef=useRef(null),meRef=useRef(null),followRef=useRef(true),pathRef=useRef(null);
+  const [rerouting,setRerouting]=useState(false);
+  const cRef=useRef(null),mRef=useRef(null),meRef=useRef(null),followRef=useRef(true),pathRef=useRef(null),offCntRef=useRef(0);
   followRef.current=follow;
 
   // Flatten the route once: points, cumulative km, ferry leg boundaries
+  if(pathRef.current&&pathRef.current.R!==R)pathRef.current=null; // rebuilt after reroute
   if(!pathRef.current){
     const pts=[],ferries=[];let fi=0;
     for(const st of R.osrmSteps||[]){
@@ -1110,7 +1199,7 @@ function NavScreen({R,now,T,on}){
     }
     const cum=[0];
     for(let i=1;i<pts.length;i++)cum.push(cum[i-1]+haversineKm(pts[i-1],pts[i]));
-    pathRef.current={pts,cum,ferries,total:cum[cum.length-1]||0};
+    pathRef.current={R,pts,cum,ferries,total:cum[cum.length-1]||0};
   }
 
   useEffect(()=>{
@@ -1141,9 +1230,24 @@ function NavScreen({R,now,T,on}){
     }
     if(R.to)L.marker([R.to.lat,R.to.lon],{icon:L.divIcon({html:`<div style="width:15px;height:15px;border-radius:50%;background:${ACC};border:3px solid var(--bg);"></div>`,className:'',iconSize:[15,15],iconAnchor:[7,7]})}).addTo(map);
     if(bounds.isValid())map.fitBounds(bounds,{padding:[40,40]});
+    // live ferry vessels on the crossings, refreshed every 20 s
+    let vessels=[],vTimer=null;
+    const bbox=ferryBBox(R.osrmSteps);
+    if(bbox){
+      const draw=async()=>{
+        const vs=await fetchVessels(bbox);
+        if(!mRef.current)return;
+        vessels.forEach(m=>{try{map.removeLayer(m);}catch(e){}});
+        vessels=vs.map(v=>L.marker([v.location.latitude,v.location.longitude],{zIndexOffset:900,
+          icon:L.divIcon({className:'',iconSize:[26,26],iconAnchor:[13,13],
+            html:`<div data-vessel style="width:26px;height:26px;border-radius:50%;background:${mFer};display:flex;align-items:center;justify-content:center;font-size:14px;border:2px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.4);">⛴</div>`})}).addTo(map));
+      };
+      draw();
+      vTimer=setInterval(draw,20000);
+    }
     mRef.current=map;
-    return()=>{map.remove();mRef.current=null;meRef.current=null;};
-  },[]);
+    return()=>{if(vTimer)clearInterval(vTimer);map.remove();mRef.current=null;meRef.current=null;};
+  },[R]);
 
   useEffect(()=>{
     if(!pos||!mRef.current||!window.L)return;
@@ -1182,6 +1286,23 @@ function NavScreen({R,now,T,on}){
       }:null
     };
   }
+  // Persistently off route → replan from the current position
+  useEffect(()=>{
+    if(!pos)return;
+    if(!info||!info.offRoute||info.arrived||rerouting){
+      if(info&&!info.offRoute)offCntRef.current=0;
+      return;
+    }
+    offCntRef.current++;
+    if(offCntRef.current<2)return; // two consecutive off-route fixes
+    setRerouting(true);
+    planAlternatives({from:{name:T.myLocName,lat:pos.lat,lon:pos.lon},to:R.to,via:null,
+      date:todayOslo(),timeMin:nowMinutes(),mode:'leave',margin,lang})
+      .then(rs=>{if(rs?.length)on('applyReroute',rs);})
+      .catch(()=>{})
+      .finally(()=>{setRerouting(false);offCntRef.current=0;});
+  },[pos]);
+
   const fmtKm=km=>km<10?km.toFixed(1)+' km':Math.round(km)+' km';
   const catchOk=info?.ferry?info.ferry.eta<=info.ferry.dep:true;
   const nextDep=info?.ferry&&!catchOk?earliestDep(info.ferry.deps,info.ferry.eta):null;
@@ -1195,7 +1316,8 @@ function NavScreen({R,now,T,on}){
     h('div',{onClick:()=>setFollow(f=>!f),style:{...btn,position:'absolute',right:14,bottom:'calc(150px + env(safe-area-inset-bottom))',fontSize:18,color:follow?ACC:MUT}},'◎'),
     // top pill: where you are heading
     h('div',{style:{position:'absolute',left:'50%',transform:'translateX(-50%)',top:'calc(14px + env(safe-area-inset-top))',padding:'9px 16px',borderRadius:24,background:'var(--glass)',backdropFilter:'blur(8px)',border:'1px solid var(--border)',fontSize:13,fontWeight:700,whiteSpace:'nowrap',zIndex:500,maxWidth:'70%',overflow:'hidden',textOverflow:'ellipsis'}},
-      !pos?T.navGps
+      rerouting?T.navReroute
+        :!pos?T.navGps
         :info.arrived?T.navArrived
         :info.aboard?'⛴ '+T.navAboard
         :info.ferry?'⛴ '+fmtKm(info.ferry.km)+' '+T.navFerryIn
@@ -1301,16 +1423,65 @@ function App(){
 
   useEffect(()=>{const id=setInterval(()=>setNow(nowMinutes()),60000);return()=>clearInterval(id);},[]);
 
+  // Silent refresh of ferry schedules every 2.5 min (and when the app
+  // returns to the foreground) so cancellations reach you before the quay
+  useEffect(()=>{
+    if(!results)return;
+    let busy=false;
+    const refresh=async()=>{
+      if(busy||document.hidden)return;
+      busy=true;
+      try{
+        const stops={};
+        results.forEach(R=>(R.ferries||[]).forEach(f=>{if(f.stopId)stops[f.stopId]=null;}));
+        const ids=Object.keys(stops);
+        if(!ids.length)return;
+        await Promise.all(ids.map(async id=>{try{stops[id]=await getFerryDeps(id,date);}catch(e){}}));
+        setResults(prev=>prev&&prev.map(R=>{
+          let changed=false;
+          const ferries=(R.ferries||[]).map(f=>{
+            const r=f.stopId?stops[f.stopId]:null;
+            if(!r||!r.deps.length)return f;
+            changed=true;
+            const usable=r.deps.filter(d=>!d.cancelled).map(d=>d.t);
+            return{...f,dep:usable.length?usable:r.deps.map(d=>d.t),allDeps:r.deps,alerts:r.alerts,isLive:true};
+          });
+          return changed?scheduleResult({...R,ferries},{timeMin,mode,margin,lang}):R;
+        }));
+      }finally{busy=false;}
+    };
+    const id=setInterval(refresh,150000);
+    const vis=()=>{if(!document.hidden)refresh();};
+    document.addEventListener('visibilitychange',vis);
+    return()=>{clearInterval(id);document.removeEventListener('visibilitychange',vis);};
+  },[results,date,mode,timeMin,margin,lang]);
+
   // Open a shared link: prefill everything and plan the route immediately
   useEffect(()=>{
     const s=parseShareUrl();
-    if(!s)return;
+    if(!s){
+      // no share link: restore the last plan (works offline)
+      const saved=loadPlan();
+      if(saved){
+        const r0=saved.results[0];
+        setResults(saved.results);setSelIdx(saved.selIdx||0);
+        if(r0?.from){setFrom(r0.from);setFromText(r0.from.name);}
+        if(r0?.to){setTo(r0.to);setToText(r0.to.name);}
+        if(saved.date)setDate(saved.date);
+        if(saved.mode)setMode(saved.mode);
+        if(saved.timeMin!=null)setTimeMin(saved.timeMin);
+        if(saved.margin!=null)setMargin(saved.margin);
+        if(saved.vehicle&&VEHICLES[saved.vehicle])setVehicle(saved.vehicle);
+      }
+      return;
+    }
     setFrom(s.from);setTo(s.to);setFromText(s.from.name);setToText(s.to.name);
     if(s.via){setVia(s.via);setViaText(s.via.name);setShowVia(true);}
     setDate(s.date);setMode(s.mode);setTimeMin(s.timeMin);setMargin(s.margin);setVehicle(s.vehicle);
     setLoading(true);
     planAlternatives({from:s.from,to:s.to,via:s.via,date:s.date,timeMin:s.timeMin,mode:s.mode,margin:s.margin,vehicle:s.vehicle,lang:localStorage.getItem('fn_lang')==='en'?'en':'no'})
-      .then(r=>{setResults(r);setSelIdx(0);setScreen('results');})
+      .then(r=>{setResults(r);setSelIdx(0);setScreen('results');
+        savePlan({results:r,selIdx:0,date:s.date,mode:s.mode,timeMin:s.timeMin,margin:s.margin,vehicle:s.vehicle});})
       .catch(e=>setError(e.message==='NOROUTE'?STR.no.errNoRoute:STR.no.errGeneric))
       .finally(()=>setLoading(false));
   },[]);
@@ -1361,7 +1532,8 @@ function App(){
     setLoading(true);setError(null);
     planAlternatives({from:f,to:t,via:v||null,date,timeMin,mode,margin,lang,vehicle})
       .then(r=>{setResults(r);setSelIdx(0);setSelectedFerry(0);setAnchors({});
-        setScreen('results');addRecent(f,t);})
+        setScreen('results');addRecent(f,t);
+        savePlan({results:r,selIdx:0,date,mode,timeMin,margin,vehicle});})
       .catch(e=>setError(e.message==='NOROUTE'?T.errNoRoute:T.errGeneric))
       .finally(()=>setLoading(false));
   }
@@ -1437,6 +1609,10 @@ function App(){
         break;}
       case 'nfClear': setNfText('');setNfStop(null);setNfSugs([]);setNfDeps(null);break;
       case 'startNav': setScreen('nav');break;
+      case 'applyReroute':{
+        setResults(data);setSelIdx(0);setAnchors({});
+        savePlan({results:data,selIdx:0,date,mode,timeMin,margin,vehicle});
+        break;}
       case 'exitNav': setScreen('results');break;
       case 'back': setScreen('plan');break;
       case 'backToResults': setScreen('results');break;
@@ -1451,7 +1627,7 @@ function App(){
     screen==='results'&&result&&h(ResultsScreen,{results,selIdx,result,mode,margin,timeMin,shared,vehicle,T,theme,on}),
     screen==='timetable'&&result&&h(TimetableScreen,{result,selectedFerry,now,T,lang,theme,on}),
     screen==='nextferry'&&h(NextFerryScreen,{T,lang,now,nfText,nfSugs,nfStop,nfDeps,nfLoading,theme,on}),
-    screen==='nav'&&result&&h(NavScreen,{R:result,now,T,on}),
+    screen==='nav'&&result&&h(NavScreen,{R:result,now,margin,lang,T,on}),
     h(TabBar,{screen,hasResult:!!result,T,on})
   );
 

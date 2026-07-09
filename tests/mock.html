@@ -59,6 +59,9 @@
         name:lavik?'Lavik ferjekai':'Oppedal ferjekai',category:['ferryStop']},
         geometry:{coordinates:lavik?[5.53,61.11]:[5.60,61.15]}}]});
     }
+    if(url.includes('realtime/v2/vehicles'))
+      return json({data:{vehicles:[{vehicleId:'MF-TEST',mode:'WATER',lastUpdated:new Date().toISOString(),
+        location:{latitude:61.13,longitude:5.56},line:{lineRef:'MOR:Line:1'}}]}});
     if(url.includes('journey-planner')){
       // stop 2 runs a different (60-min, offset) grid so multi-ferry
       // connection quality varies through the day
