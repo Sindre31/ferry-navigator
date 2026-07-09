@@ -79,6 +79,7 @@ no:{
   navGps:'Venter på GPS…',navEta:'ca. ankomst',navKmh:'km/t',navFerryIn:'til fergekaia',
   lateWarn:m=>'⚠ Du ankommer kaia '+m+' min etter denne avgangen',
   tightWarn:m=>'⚠ Dårlig tid – bare '+m+' min margin på kaia',
+  bestTimes:'Beste avreisetider',bestBadge:'BEST',bestHint:'Fergene korresponderer best på de grønne tidspunktene',
   errPos:'Fikk ikke tilgang til posisjonen din',errPosSupport:'Posisjon støttes ikke i denne nettleseren',
   viaLabel:'via'
 },
@@ -111,6 +112,7 @@ en:{
   navGps:'Waiting for GPS…',navEta:'est. arrival',navKmh:'km/h',navFerryIn:'to the ferry quay',
   lateWarn:m=>'⚠ You reach the quay '+m+' min after this departure',
   tightWarn:m=>'⚠ Tight – only '+m+' min margin at the quay',
+  bestTimes:'Best departure times',bestBadge:'BEST',bestHint:'Ferry connections align best at the green times',
   errPos:'Could not access your location',errPosSupport:'Geolocation is not supported in this browser',
   viaLabel:'via'
 }};
@@ -584,6 +586,28 @@ async function planAlternatives(opts){
   return out.filter(r=>r.total<=bestTotal*1.4);
 }
 
+// For every first-ferry departure today: leave home so you just catch it,
+// chain the rest forward, and compare totals — connections that align give
+// the day's fastest crossings
+function bestDepartures(R,margin){
+  const F=R.ferries,D=R.drives;
+  if(!F?.length||!D)return[];
+  const out=[];
+  for(const d of F[0].dep){
+    if(d<240||d>=1440)continue;
+    const t0=d-margin-(D[0]?.dur||0);
+    let t=d+F[0].crossingMin+(D[1]?.dur||0);
+    for(let i=1;i<F.length;i++){
+      const dep=earliestDep(F[i].dep,t+margin);
+      t=dep+F[i].crossingMin+(D[i+1]?.dur||0);
+    }
+    out.push({leave:t0,dep:d,arrive:t,total:t-t0});
+  }
+  if(!out.length)return[];
+  const min=Math.min(...out.map(x=>x.total));
+  return out.map(x=>({...x,best:x.total<=min+10}));
+}
+
 // Re-anchor the schedule on one explicitly chosen ferry departure.
 // Ferry #1: the home departure time moves to match (leave-as-late-as-fits).
 // Later ferries: earlier legs stay untouched — picking a departure you
@@ -839,6 +863,8 @@ function ResultsScreen({results,selIdx,result,mode,margin,timeMin,shared,vehicle
   // Arrive-by mode: arriving later than requested is flagged in red
   const late=mode==='arrive'&&R.arrive>timeMin;
   const [vehOpen,setVehOpen]=useState(false);
+  const [bestOpen,setBestOpen]=useState(false);
+  const bestRows=R.numFerries?bestDepartures(results[selIdx],margin):[];
   // Fare recomputed live from the chosen vehicle type
   const cost=R.ferries.reduce((s,f)=>s+(f.km!=null?ferryFare(f.km,vehicle):f.fare),0);
   const vehIcon={car:'🚗',ev:'⚡',mc:'🏍',long:'🚐'}[vehicle]||'🚗';
@@ -879,8 +905,27 @@ function ResultsScreen({results,selIdx,result,mode,margin,timeMin,shared,vehicle
       h('div',{style:{display:'flex',gap:7,margin:'12px 0 10px',flexWrap:'wrap'}},
         h('span',{style:{padding:'6px 12px',borderRadius:30,background:PANEL,fontSize:12,fontWeight:600,fontFamily:"'JetBrains Mono',monospace"}},R.distance+' km'),
         h('span',{style:{padding:'6px 12px',borderRadius:30,background:PANEL,fontSize:12,fontWeight:600}},R.numFerries?T.ferriesN(R.numFerries):T.noFerryB),
-        h('span',{style:{padding:'6px 12px',borderRadius:30,background:'rgba(43,217,208,.12)',color:ACC,fontSize:12,fontWeight:600}},T.bufferChip(margin))
+        h('span',{style:{padding:'6px 12px',borderRadius:30,background:'rgba(43,217,208,.12)',color:ACC,fontSize:12,fontWeight:600}},T.bufferChip(margin)),
+        bestRows.length>1?h('span',{onClick:()=>setBestOpen(v=>!v),style:{padding:'6px 12px',borderRadius:30,background:bestOpen?ACC:PANEL,color:bestOpen?'#04181A':'#EDF1F5',fontSize:12,fontWeight:700,cursor:'pointer'}},'☀ '+T.bestTimes+(bestOpen?' ▴':' ▾')):null
       ),
+      bestOpen&&bestRows.length>1?h('div',{style:{marginBottom:12,borderRadius:14,border:'1px solid #222A33',background:PANEL,overflow:'hidden'}},
+        h('div',{style:{padding:'9px 14px 7px',fontSize:11,color:MUT,borderBottom:'1px solid #1c2027'}},T.bestHint),
+        h('div',{className:'scroll-hide',style:{maxHeight:250,overflowY:'auto'}},
+          bestRows.map((r,i)=>h('div',{key:i,onClick:()=>{on('pickDep',{ferryIdx:0,dep:r.dep});setBestOpen(false);},
+            style:{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 14px',cursor:'pointer',
+              borderBottom:i<bestRows.length-1?'1px solid #1c2027':'none',
+              background:r.best?'rgba(43,217,208,.07)':'transparent'}},
+            h('div',{style:{display:'flex',alignItems:'center',gap:10}},
+              h('span',{style:{fontFamily:"'JetBrains Mono',monospace",fontSize:14,fontWeight:700,color:r.best?ACC:'#EDF1F5'}},fmt(r.leave)),
+              h('span',{style:{fontSize:11,color:MUT}},'→ '+fmt(r.arrive)+(r.arrive>=1440?' +1':''))
+            ),
+            h('div',{style:{display:'flex',alignItems:'center',gap:8}},
+              h('span',{style:{fontFamily:"'JetBrains Mono',monospace",fontSize:13,fontWeight:700,color:r.best?ACC:MUT}},durFmt(r.total)),
+              r.best?h('span',{style:{fontSize:9,fontWeight:800,color:'#04181A',background:ACC,padding:'2px 6px',borderRadius:6,letterSpacing:'.06em'}},T.bestBadge):null
+            )
+          ))
+        )
+      ):null,
       // Timeline
       h('div',{style:{paddingTop:4}},
         R.steps.map((step,i)=>h('div',{key:i,style:{display:'flex',gap:14}},
