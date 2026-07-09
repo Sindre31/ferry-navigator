@@ -72,6 +72,11 @@ no:{
   fareEst:'Fergetakst · estimat',
   errNoRoute:'Ingen rute funnet',errGeneric:'Noe gikk galt – prøv igjen',
   veh:'Kjøretøy',vehCar:'Bil',vehEv:'El-bil',vehMc:'MC',vehLong:'Over 6 m',
+  navStart:'Start',navToDest:'til mål',navAboard:'Om bord på fergen',
+  navArrived:'Fremme! 🎉',navArrivedSub:'Du er ved målet',navOffRoute:'⚠ Utenfor ruten',
+  navCatch:(d,m)=>'Rekker '+d+'-fergen · '+m+' min margin',
+  navMiss:(d,n)=>'Rekker ikke '+d+' · neste '+n,
+  navGps:'Venter på GPS…',navEta:'ca. ankomst',navKmh:'km/t',navFerryIn:'til fergekaia',
   errPos:'Fikk ikke tilgang til posisjonen din',errPosSupport:'Posisjon støttes ikke i denne nettleseren',
   viaLabel:'via'
 },
@@ -97,6 +102,11 @@ en:{
   fareEst:'Ferry fare · estimate',
   errNoRoute:'No route found',errGeneric:'Something went wrong – try again',
   veh:'Vehicle',vehCar:'Car',vehEv:'EV',vehMc:'MC',vehLong:'Over 6 m',
+  navStart:'Start',navToDest:'to destination',navAboard:'On board the ferry',
+  navArrived:'Arrived! 🎉',navArrivedSub:'You are at your destination',navOffRoute:'⚠ Off route',
+  navCatch:(d,m)=>'Catches the '+d+' ferry · '+m+' min margin',
+  navMiss:(d,n)=>'Misses '+d+' · next '+n,
+  navGps:'Waiting for GPS…',navEta:'est. arrival',navKmh:'km/h',navFerryIn:'to the ferry quay',
   errPos:'Could not access your location',errPosSupport:'Geolocation is not supported in this browser',
   viaLabel:'via'
 }};
@@ -190,6 +200,13 @@ function durFmt(m){m=Math.round(m);const hh=Math.floor(m/60),mm=m%60;return hh&&
 function gen(a,b,s){const r=[];for(let t=a;t<=b;t+=s)r.push(t);return r;}
 function latestDep(deps,lim){let r=deps[0];for(const d of deps)if(d<=lim)r=d;return r;}
 function earliestDep(deps,min){for(const d of deps)if(d>=min)return d;return deps[deps.length-1];}
+
+function haversineKm(a,b){
+  const R=6371,rad=x=>x*Math.PI/180;
+  const dLat=rad(b[0]-a[0]),dLon=rad(b[1]-a[1]);
+  const h=Math.sin(dLat/2)**2+Math.cos(rad(a[0]))*Math.cos(rad(b[0]))*Math.sin(dLon/2)**2;
+  return 2*R*Math.asin(Math.sqrt(h));
+}
 
 function nowMinutes(){
   const p=new Intl.DateTimeFormat('en',{timeZone:'Europe/Oslo',hour:'numeric',minute:'numeric',hour12:false}).formatToParts(new Date());
@@ -823,7 +840,8 @@ function ResultsScreen({results,selIdx,result,mode,margin,timeMin,shared,vehicle
       h(MapView,{results,selIdx,selTotal:R.total,from:R.from,to:R.to,onSelect:i=>on('selAlt',i)}),
       h('div',{onClick:()=>on('back'),style:{position:'absolute',left:16,top:'calc(16px + env(safe-area-inset-top))',width:40,height:40,borderRadius:'50%',background:'rgba(11,14,17,.8)',backdropFilter:'blur(6px)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:20,border:'1px solid #222A33',cursor:'pointer',zIndex:400}},'‹'),
       h('div',{style:{position:'absolute',right:16,top:'calc(16px + env(safe-area-inset-top))',padding:'7px 13px',borderRadius:30,background:'rgba(11,14,17,.8)',backdropFilter:'blur(6px)',fontSize:12,fontWeight:600,border:'1px solid #222A33',zIndex:400}},R.numFerries?T.ferriesN(R.numFerries):T.noFerryB),
-      R.isLive&&h('div',{style:{position:'absolute',right:16,bottom:14,padding:'4px 10px',borderRadius:20,background:'rgba(43,217,208,.2)',border:'1px solid '+ACC,fontSize:10,fontWeight:700,color:ACC,zIndex:400,letterSpacing:'.06em'}},T.liveData)
+      R.isLive&&h('div',{style:{position:'absolute',right:16,bottom:14,padding:'4px 10px',borderRadius:20,background:'rgba(43,217,208,.2)',border:'1px solid '+ACC,fontSize:10,fontWeight:700,color:ACC,zIndex:400,letterSpacing:'.06em'}},T.liveData),
+      h('div',{onClick:()=>on('startNav'),style:{position:'absolute',left:16,bottom:14,padding:'10px 18px',borderRadius:24,background:ACC,color:'#04181A',fontSize:13,fontWeight:700,fontFamily:"'Space Grotesk',sans-serif",cursor:'pointer',zIndex:400,boxShadow:'0 4px 16px rgba(43,217,208,.4)'}},'▶ '+T.navStart)
     ),
     // Bottom sheet
     h('div',{className:'scroll-hide',style:{flex:1,background:'#11151B',borderRadius:'26px 26px 0 0',marginTop:-22,position:'relative',padding:'8px 20px 0',display:'flex',flexDirection:'column',overflowY:'auto',zIndex:2}},
@@ -1006,9 +1024,146 @@ function NextFerryScreen({T,lang,now,nfText,nfSugs,nfStop,nfDeps,nfLoading,on}){
   );
 }
 
+// ── NavScreen: live navigation along the planned route ────────────────────
+function NavScreen({R,now,T,on}){
+  const [pos,setPos]=useState(null);
+  const [navErr,setNavErr]=useState(null);
+  const [follow,setFollow]=useState(true);
+  const cRef=useRef(null),mRef=useRef(null),meRef=useRef(null),followRef=useRef(true),pathRef=useRef(null);
+  followRef.current=follow;
+
+  // Flatten the route once: points, cumulative km, ferry leg boundaries
+  if(!pathRef.current){
+    const pts=[],ferries=[];let fi=0;
+    for(const st of R.osrmSteps||[]){
+      const cs=st.geometry?.coordinates||[];
+      if(st.mode==='ferry'){ferries.push({startIdx:pts.length,endIdx:pts.length+Math.max(cs.length-1,0),idx:fi});fi++;}
+      for(const c of cs)pts.push([c[1],c[0]]);
+    }
+    const cum=[0];
+    for(let i=1;i<pts.length;i++)cum.push(cum[i-1]+haversineKm(pts[i-1],pts[i]));
+    pathRef.current={pts,cum,ferries,total:cum[cum.length-1]||0};
+  }
+
+  useEffect(()=>{
+    if(!navigator.geolocation){setNavErr(T.errPosSupport);return;}
+    const id=navigator.geolocation.watchPosition(
+      p=>setPos({lat:p.coords.latitude,lon:p.coords.longitude,speed:p.coords.speed||0}),
+      ()=>setNavErr(T.errPos),
+      {enableHighAccuracy:true,maximumAge:2000,timeout:20000});
+    let wl=null;
+    if(navigator.wakeLock)navigator.wakeLock.request('screen').then(l=>{wl=l;}).catch(()=>{});
+    return()=>{navigator.geolocation.clearWatch(id);if(wl)wl.release().catch(()=>{});};
+  },[]);
+
+  useEffect(()=>{
+    if(!cRef.current||!window.L)return;
+    const map=L.map(cRef.current,{zoomControl:false,attributionControl:false});
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{subdomains:'abcd',maxZoom:19}).addTo(map);
+    const bounds=L.latLngBounds();
+    for(const st of R.osrmSteps||[]){
+      if(!st.geometry?.coordinates?.length)continue;
+      const coords=st.geometry.coordinates.map(c=>[c[1],c[0]]);
+      const ferry=st.mode==='ferry';
+      const pl=L.polyline(coords,{color:ferry?'#37C2F0':ACC,weight:ferry?4:5,dashArray:ferry?'8 5':null,opacity:.95}).addTo(map);
+      bounds.extend(pl.getBounds());
+      if(ferry)L.marker(coords[0],{icon:L.divIcon({html:'<div style="width:14px;height:14px;background:#37C2F0;transform:rotate(45deg);border-radius:3px;border:2px solid #0B0E11;"></div>',className:'',iconSize:[14,14],iconAnchor:[7,7]})}).addTo(map);
+    }
+    if(R.to)L.marker([R.to.lat,R.to.lon],{icon:L.divIcon({html:`<div style="width:15px;height:15px;border-radius:50%;background:${ACC};border:3px solid #0B0E11;"></div>`,className:'',iconSize:[15,15],iconAnchor:[7,7]})}).addTo(map);
+    if(bounds.isValid())map.fitBounds(bounds,{padding:[40,40]});
+    mRef.current=map;
+    return()=>{map.remove();mRef.current=null;meRef.current=null;};
+  },[]);
+
+  useEffect(()=>{
+    if(!pos||!mRef.current||!window.L)return;
+    if(!meRef.current){
+      meRef.current=L.marker([pos.lat,pos.lon],{zIndexOffset:1000,icon:L.divIcon({
+        html:'<div style="width:18px;height:18px;border-radius:50%;background:#2BD9D0;border:3px solid #fff;box-shadow:0 0 14px rgba(43,217,208,.9);"></div>',
+        className:'',iconSize:[18,18],iconAnchor:[9,9]})}).addTo(mRef.current);
+    }else if(meRef.current.setLatLng)meRef.current.setLatLng([pos.lat,pos.lon]);
+    if(followRef.current&&mRef.current.setView)
+      mRef.current.setView([pos.lat,pos.lon],Math.max(mRef.current.getZoom?mRef.current.getZoom():12,11));
+  },[pos]);
+
+  // Progress along the route
+  let info=null;
+  const P=pathRef.current;
+  if(pos&&P.pts.length>1){
+    let bi=0,bd=Infinity;
+    for(let i=0;i<P.pts.length;i++){const d=haversineKm(P.pts[i],[pos.lat,pos.lon]);if(d<bd){bd=d;bi=i;}}
+    const remain=Math.max(0,P.total-P.cum[bi]);
+    const speed=pos.speed>2?pos.speed:16.7; // m/s; fallback 60 km/h when standing still
+    const etaMin=km=>Math.round(km*1000/speed/60);
+    const nextFerry=P.ferries.find(f=>f.startIdx>bi);
+    const aboard=P.ferries.find(f=>bi>=f.startIdx&&bi<f.endIdx);
+    info={
+      offRoute:bd>0.5,
+      arrived:remain<0.3&&bd<0.6,
+      aboard,
+      destKm:remain,destEta:now+etaMin(remain),
+      speedKmh:Math.round((pos.speed||0)*3.6),
+      ferry:nextFerry?{
+        km:P.cum[nextFerry.startIdx]-P.cum[bi],
+        eta:now+etaMin(P.cum[nextFerry.startIdx]-P.cum[bi]),
+        dep:R.boarded[nextFerry.idx],
+        name:R.ferries[nextFerry.idx]?.name||'',
+        deps:R.ferries[nextFerry.idx]?.dep||[]
+      }:null
+    };
+  }
+  const fmtKm=km=>km<10?km.toFixed(1)+' km':Math.round(km)+' km';
+  const catchOk=info?.ferry?info.ferry.eta<=info.ferry.dep:true;
+  const nextDep=info?.ferry&&!catchOk?earliestDep(info.ferry.deps,info.ferry.eta):null;
+  const btn={width:44,height:44,borderRadius:'50%',background:'rgba(11,14,17,.85)',backdropFilter:'blur(6px)',display:'flex',alignItems:'center',justifyContent:'center',border:'1px solid #222A33',cursor:'pointer',zIndex:500};
+
+  return h('div',{style:{position:'absolute',inset:0}},
+    h('div',{ref:cRef,style:{position:'absolute',inset:0}}),
+    // exit
+    h('div',{onClick:()=>on('exitNav'),style:{...btn,position:'absolute',left:14,top:'calc(14px + env(safe-area-inset-top))',fontSize:18}},'✕'),
+    // follow toggle
+    h('div',{onClick:()=>setFollow(f=>!f),style:{...btn,position:'absolute',right:14,bottom:'calc(150px + env(safe-area-inset-bottom))',fontSize:18,color:follow?ACC:MUT}},'◎'),
+    // top pill: where you are heading
+    h('div',{style:{position:'absolute',left:'50%',transform:'translateX(-50%)',top:'calc(14px + env(safe-area-inset-top))',padding:'9px 16px',borderRadius:24,background:'rgba(11,14,17,.88)',backdropFilter:'blur(8px)',border:'1px solid #222A33',fontSize:13,fontWeight:700,whiteSpace:'nowrap',zIndex:500,maxWidth:'70%',overflow:'hidden',textOverflow:'ellipsis'}},
+      !pos?T.navGps
+        :info.arrived?T.navArrived
+        :info.aboard?'⛴ '+T.navAboard
+        :info.ferry?'⛴ '+fmtKm(info.ferry.km)+' '+T.navFerryIn
+        :'◎ '+fmtKm(info.destKm)+' '+T.navToDest),
+    info?.offRoute&&!info.arrived?h('div',{style:{position:'absolute',left:'50%',transform:'translateX(-50%)',top:'calc(64px + env(safe-area-inset-top))',padding:'6px 13px',borderRadius:18,background:'rgba(237,185,59,.92)',color:'#1a1405',fontSize:12,fontWeight:700,zIndex:500,whiteSpace:'nowrap'}},T.navOffRoute):null,
+    // bottom card
+    h('div',{style:{position:'absolute',left:12,right:12,bottom:'calc(12px + env(safe-area-inset-bottom))',borderRadius:20,background:'rgba(17,21,27,.94)',backdropFilter:'blur(10px)',border:'1px solid #222A33',padding:'14px 18px',zIndex:500}},
+      navErr?h('div',{style:{color:'#ff9090',fontSize:13}},'⚠ '+navErr)
+      :!pos?h('div',{style:{color:MUT,fontSize:14,textAlign:'center',padding:8}},'⟳ '+T.navGps)
+      :info.arrived?h('div',{style:{textAlign:'center',padding:6}},
+        h('div',{style:{fontFamily:"'Space Grotesk',sans-serif",fontSize:24,fontWeight:700,color:ACC}},T.navArrived),
+        h('div',{style:{fontSize:13,color:MUT,marginTop:4}},T.navArrivedSub))
+      :h('div',null,
+        info.ferry?h('div',{style:{display:'flex',alignItems:'center',gap:8,marginBottom:8,padding:'8px 12px',borderRadius:12,background:catchOk?'rgba(43,217,208,.1)':'rgba(255,107,107,.1)',border:'1px solid '+(catchOk?'rgba(43,217,208,.4)':'rgba(255,107,107,.4)')}},
+          h('span',{style:{fontSize:15}},catchOk?'✓':'✗'),
+          h('div',{style:{fontSize:12.5,fontWeight:600,color:catchOk?ACC:'#FF6B6B',lineHeight:1.35}},
+            catchOk?T.navCatch(fmt(info.ferry.dep),Math.max(0,info.ferry.dep-info.ferry.eta)):T.navMiss(fmt(info.ferry.dep),nextDep!=null?fmt(nextDep):'–'),
+            h('div',{style:{color:MUT,fontWeight:500}},info.ferry.name))
+        ):null,
+        h('div',{style:{display:'flex',alignItems:'baseline',justifyContent:'space-between'}},
+          h('div',null,
+            h('span',{style:{fontFamily:"'JetBrains Mono',monospace",fontSize:24,fontWeight:700}},fmtKm(info.destKm)),
+            h('span',{style:{fontSize:12,color:MUT,marginLeft:8}},T.navToDest)),
+          h('div',{style:{textAlign:'right'}},
+            h('div',{style:{fontFamily:"'JetBrains Mono',monospace",fontSize:16,fontWeight:700,color:ACC}},fmt(info.destEta)),
+            h('div',{style:{fontSize:10,color:MUT}},T.navEta)),
+          h('div',{style:{textAlign:'right'}},
+            h('div',{style:{fontFamily:"'JetBrains Mono',monospace",fontSize:16,fontWeight:700}},info.speedKmh),
+            h('div',{style:{fontSize:10,color:MUT}},T.navKmh))
+        )
+      )
+    )
+  );
+}
+
 // ── TabBar ─────────────────────────────────────────────────────────────────
 function TabBar({screen,hasResult,T,on}){
-  if(screen==='results')return null;
+  if(screen==='results'||screen==='nav')return null;
   const c=s=>s===screen?ACC:MUT;
   const tab=(key,icon,label,cb)=>h('div',{onClick:cb,style:{flex:1,textAlign:'center',cursor:'pointer',color:c(key)}},
     h('div',{style:{fontSize:20,lineHeight:1}},icon),
@@ -1201,6 +1356,8 @@ function App(){
           .finally(()=>setNfLoading(false));
         break;}
       case 'nfClear': setNfText('');setNfStop(null);setNfSugs([]);setNfDeps(null);break;
+      case 'startNav': setScreen('nav');break;
+      case 'exitNav': setScreen('results');break;
       case 'back': setScreen('plan');break;
       case 'backToResults': setScreen('results');break;
       case 'openTT': if(result?.ferries?.length>0){setSelectedFerry(data||0);setScreen('timetable');}break;
@@ -1214,6 +1371,7 @@ function App(){
     screen==='results'&&result&&h(ResultsScreen,{results,selIdx,result,mode,margin,timeMin,shared,vehicle,T,on}),
     screen==='timetable'&&result&&h(TimetableScreen,{result,selectedFerry,now,T,lang,on}),
     screen==='nextferry'&&h(NextFerryScreen,{T,lang,now,nfText,nfSugs,nfStop,nfDeps,nfLoading,on}),
+    screen==='nav'&&result&&h(NavScreen,{R:result,now,T,on}),
     h(TabBar,{screen,hasResult:!!result,T,on})
   );
 
