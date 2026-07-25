@@ -259,8 +259,20 @@ function earliestDep(deps,min){for(const d of deps)if(d>=min)return d;return dep
 // one lies close to the other's path. Comparing totals instead merges
 // genuinely different corridors that happen to take equally long — that is
 // what used to hide the E39 crossing at Anda–Lote behind the inland route.
+// Compare on the step geometry, which keeps full detail — the route overview
+// is simplified for transfer and blurs corridors that split for a single leg
+const pathCache=new WeakMap(); // kept off the route itself — it gets saved
+function routePath(r){
+  let p=pathCache.get(r);
+  if(p)return p;
+  const steps=(r.legs||[]).flatMap(l=>l.steps||[]);
+  const pts=steps.flatMap(s=>s.geometry?.coordinates||[]);
+  p=pts.length>1?pts:(r.geometry?.coordinates||[]);
+  pathCache.set(r,p);
+  return p;
+}
 function samplePath(r,n){
-  const g=r.geometry?.coordinates||[];
+  const g=routePath(r);
   if(g.length<2)return[];
   const out=[];
   for(let i=0;i<n;i++)out.push(g[Math.round(i*(g.length-1)/(n-1))]);
@@ -360,6 +372,19 @@ function isoToMin(iso,baseDate){
 }
 
 // ── API ────────────────────────────────────────────────────────────────────
+// Every route alternative that crosses the same fjord needs the same quay and
+// the same timetable, and they are planned in parallel — without a cache one
+// search looked up Lavik four times over. Caching the promise also collapses
+// the concurrent lookups into a single request.
+const stopCache=new Map(),depCache=new Map(),quayCache=new Map(),DEP_TTL=60000;
+function memo(cache,key,make,ttl){
+  const hit=cache.get(key);
+  if(hit&&(!ttl||Date.now()-hit.ts<ttl))return hit.p;
+  const p=make();
+  cache.set(key,{p,ts:Date.now()});
+  p.catch(()=>cache.delete(key)); // never remember a failed request
+  return p;
+}
 async function searchPlaces(text){
   const r=await fetch(`https://api.entur.io/geocoder/v1/autocomplete?text=${encodeURIComponent(text)}&lang=no&size=8`,{headers:{'ET-Client-Name':'ferrynav-app'}});
   const d=await r.json();
@@ -379,11 +404,15 @@ async function searchQuays(text){
 // search ignores boundary.rect — searching "ferjekai" from Bergen to Ålesund
 // happily returns Horten and Moskenes — so ask the journey planner for stop
 // places inside the box instead and keep the ones boats actually serve.
-async function ferryQuaysInBox(a,b){
+function ferryQuaysInBox(a,b){
+  const box=[a.lat,a.lon,b.lat,b.lon].map(v=>v.toFixed(2)).join(',');
+  return memo(quayCache,box,()=>loadFerryQuays(a,b));
+}
+async function loadFerryQuays(a,b){
   try{
     const minLat=Math.min(a.lat,b.lat)-0.15,maxLat=Math.max(a.lat,b.lat)+0.15;
     const minLon=Math.min(a.lon,b.lon)-0.3,maxLon=Math.max(a.lon,b.lon)+0.3;
-    const q=`{stopPlacesByBbox(minimumLatitude:${minLat} maximumLatitude:${maxLat} minimumLongitude:${minLon} maximumLongitude:${maxLon} filterByInUse:true){id name latitude longitude transportMode}}`;
+    const q=`{stopPlacesByBbox(minimumLatitude:${minLat} maximumLatitude:${maxLat} minimumLongitude:${minLon} maximumLongitude:${maxLon} filterByInUse:true){name latitude longitude transportMode}}`;
     const r=await fetchRetry('https://api.entur.io/journey-planner/v3/graphql',{method:'POST',headers:{'Content-Type':'application/json','ET-Client-Name':'ferrynav-app'},body:JSON.stringify({query:q})});
     const{data}=await r.json();
     return(data?.stopPlacesByBbox||[])
@@ -392,18 +421,42 @@ async function ferryQuaysInBox(a,b){
       // car ferries only — "ferjekai"/"fergekai"/"ferjeleie", not express-boat
       // or cruise quays you cannot drive onto
       .filter(s=>/fer[jg]e/i.test(s.name))
-      .map(s=>({name:s.name,id:s.id,lat:s.latitude,lon:s.longitude}));
+      .map(s=>({name:s.name,lat:s.latitude,lon:s.longitude}));
   }catch(e){return[];}
 }
+
+// Encoded polylines instead of GeoJSON coordinate arrays: same geometry at a
+// third of the bytes (a Bergen–Ålesund query drops from 1.5 MB to 0.3 MB)
+function decodePolyline(str,factor){
+  let i=0,lat=0,lon=0;const out=[];
+  while(i<str.length){
+    let shift=0,result=0,b;
+    do{b=str.charCodeAt(i++)-63;result|=(b&0x1f)<<shift;shift+=5;}while(b>=0x20);
+    lat+=(result&1)?~(result>>1):(result>>1);
+    shift=0;result=0;
+    do{b=str.charCodeAt(i++)-63;result|=(b&0x1f)<<shift;shift+=5;}while(b>=0x20);
+    lon+=(result&1)?~(result>>1):(result>>1);
+    out.push([lon/factor,lat/factor]);
+  }
+  return out;
+}
+function asGeoJson(g){return typeof g==='string'?{coordinates:decodePolyline(g,1e6)}:g;}
 
 async function fetchOSRM(points,params){
   try{
     const cs=points.map(p=>p.lon+','+p.lat).join(';');
-    // no trailing "&" — the OSRM demo server rejects it as a malformed query
-    const qs='steps=true&geometries=geojson&overview=full'+(params?'&'+params:'');
+    // no trailing "&" — the OSRM demo server rejects it as a malformed query.
+    // Step geometries stay full detail (navigation needs them); only the
+    // route overview is simplified, and it is only drawn zoomed out.
+    const qs='steps=true&geometries=polyline6&overview=simplified'+(params?'&'+params:'');
     const r=await fetchRetry(`https://router.project-osrm.org/route/v1/driving/${cs}?${qs}`);
     const d=await r.json();
-    return d.code==='Ok'?(d.routes||[]):[];
+    if(d.code!=='Ok')return [];
+    for(const rt of(d.routes||[])){
+      rt.geometry=asGeoJson(rt.geometry);
+      for(const leg of rt.legs||[])for(const st of leg.steps||[])st.geometry=asGeoJson(st.geometry);
+    }
+    return d.routes||[];
   }catch(e){return [];}
 }
 
@@ -412,9 +465,13 @@ async function routeOSRM(points){
   // motorway-free probes — every distinct, realistic option becomes a choice.
   // OSRM only supports alternatives for two-point requests, so via routes get one.
   const hasVia=points.length>2;
-  const [main,noFerry,noToll,noMotorway]=await Promise.all([
+  const [main,noFerry]=await Promise.all([
     fetchOSRM(points,hasVia?'':'alternatives=3'),
-    fetchOSRM(points,'exclude=ferry'),
+    fetchOSRM(points,'exclude=ferry')
+  ]);
+  // the toll/motorway probes rarely add a corridor the router did not already
+  // offer, so only spend the requests when the spread is thin
+  const [noToll,noMotorway]=main.length>=3?[[],[]]:await Promise.all([
     fetchOSRM(points,'exclude=toll'),
     fetchOSRM(points,'exclude=motorway')
   ]);
@@ -448,6 +505,9 @@ async function addQuayDetours(points,routes,probe){
   const deg=(p,q)=>{const dx=(p[0]-q.lon)*Math.cos(q.lat*Math.PI/180),dy=p[1]-q.lat;return Math.hypot(dx,dy);};
   const distToRoute=q=>Math.min(...sample.map(c=>deg(c,q)));
   const dAB=deg([a.lon,a.lat],b)||1e-6;
+  // Scanning the corridor for quays is the single heaviest request of a
+  // search; a short hop has no room for a parallel ferry corridor anyway
+  if(dAB<60/111)return;
   const quays=await ferryQuaysInBox(a,b);
   const cands=quays
     .map(q=>({q,off:distToRoute(q),detour:(deg([a.lon,a.lat],q)+deg([b.lon,b.lat],q))/dAB}))
@@ -498,7 +558,11 @@ async function findRoutes(points){
   return routeOSRM(points);
 }
 
-async function findFerryStop(lat,lon,name){
+// Quays do not move — one lookup per crossing per session
+function findFerryStop(lat,lon,name){
+  return memo(stopCache,lat.toFixed(4)+','+lon.toFixed(4)+'|'+(name||''),()=>lookupFerryStop(lat,lon,name));
+}
+async function lookupFerryStop(lat,lon,name){
   try{
     const r=await fetchRetry(`https://api.entur.io/geocoder/v1/reverse?point.lat=${lat}&point.lon=${lon}&size=10&layers=venue&boundary.circle.radius=3`,{headers:{'ET-Client-Name':'ferrynav-app'}});
     const d=await r.json();
@@ -520,7 +584,12 @@ async function findFerryStop(lat,lon,name){
   return null;
 }
 
-async function getFerryDeps(stopId,dateStr){
+// Short-lived cache: alternatives sharing a crossing fetch it once, while the
+// 2.5-minute background refresh still always sees a fresh timetable
+function getFerryDeps(stopId,dateStr){
+  return memo(depCache,stopId+'|'+dateStr,()=>loadFerryDeps(stopId,dateStr),DEP_TTL);
+}
+async function loadFerryDeps(stopId,dateStr){
   // 48h window from the travel date so schedules work past midnight;
   // cancellation flags and service disruptions (situations) come along
   const q=`{stopPlace(id:"${stopId}"){situations{summary{value language}}estimatedCalls(startTime:"${dateStr}T00:00:00+02:00" timeRange:172800 numberOfDepartures:200 whiteListedModes:[water]){expectedDepartureTime cancellation}}}`;
