@@ -49,6 +49,8 @@
     .leaflet-control-attribution{background:var(--glass2)!important;color:var(--mut)!important;font-size:9px!important;}
     .leaflet-control-attribution a{color:var(--mut)!important;}
     .leaflet-marker-icon{background:none!important;border:none!important;}
+    .leaflet-bar a{background:var(--panel)!important;color:var(--txt)!important;border-bottom-color:var(--border)!important;}
+    .leaflet-bar a:hover{background:var(--sugb)!important;}
   </style>
 </head>
 <body>
@@ -70,6 +72,14 @@ const ACC='var(--acc)',MUT='var(--mut)',PANEL='var(--panel)',DEF_MARGIN=5;
 //  leave  – leave exactly at the chosen time
 //  arrive – leave as late as possible and still arrive by the chosen time
 const MODES=['now','by','leave','arrive'];
+
+// How far off the best option an alternative may be before it stops being a
+// real choice. ALT_MAX applies to raw driving time while collecting routes;
+// altLimit() applies to the finished plan, ferry waiting included.
+const ALT_MAX=1.4,ALT_KEEP=4;
+// browser-mode panel width, and a stable empty list so the map is not rebuilt
+const PANEL_W=440,EMPTY=[];
+function altLimit(bestTotal){return Math.min(bestTotal*1.25,bestTotal+45)+5;}
 
 // ── i18n ───────────────────────────────────────────────────────────────────
 const STR={
@@ -244,6 +254,32 @@ function gen(a,b,s){const r=[];for(let t=a;t<=b;t+=s)r.push(t);return r;}
 function latestDep(deps,lim){let r=deps[0];for(const d of deps)if(d<=lim)r=d;return r;}
 function earliestDep(deps,min){for(const d of deps)if(d>=min)return d;return deps[deps.length-1];}
 
+// ── route similarity ───────────────────────────────────────────────────────
+// Two alternatives are the same corridor when nearly every sampled point of
+// one lies close to the other's path. Comparing totals instead merges
+// genuinely different corridors that happen to take equally long — that is
+// what used to hide the E39 crossing at Anda–Lote behind the inland route.
+function samplePath(r,n){
+  const g=r.geometry?.coordinates||[];
+  if(g.length<2)return[];
+  const out=[];
+  for(let i=0;i<n;i++)out.push(g[Math.round(i*(g.length-1)/(n-1))]);
+  return out;
+}
+function nearFrac(a,b,km){
+  const sa=samplePath(a,60),sb=samplePath(b,180);
+  if(!sa.length||!sb.length)return 0;
+  let hit=0;
+  for(const p of sa){
+    for(const q of sb){
+      const dx=(p[0]-q[0])*Math.cos(p[1]*Math.PI/180)*111.32,dy=(p[1]-q[1])*111.32;
+      if(dx*dx+dy*dy<km*km){hit++;break;}
+    }
+  }
+  return hit/sa.length;
+}
+function sameCorridor(a,b){return Math.min(nearFrac(a,b,4),nearFrac(b,a,4))>=0.85;}
+
 function haversineKm(a,b){
   const R=6371,rad=x=>x*Math.PI/180;
   const dLat=rad(b[0]-a[0]),dLon=rad(b[1]-a[1]);
@@ -339,31 +375,33 @@ async function searchQuays(text){
   )).map(f=>({name:f.properties.label||f.properties.name,id:f.properties.id,lat:f.geometry.coordinates[1],lon:f.geometry.coordinates[0]}));
 }
 
-// Ferry quays in the bounding box between the endpoints (Entur geocoder)
+// Car-ferry quays in the box between the endpoints. The geocoder's text
+// search ignores boundary.rect — searching "ferjekai" from Bergen to Ålesund
+// happily returns Horten and Moskenes — so ask the journey planner for stop
+// places inside the box instead and keep the ones boats actually serve.
 async function ferryQuaysInBox(a,b){
   try{
     const minLat=Math.min(a.lat,b.lat)-0.15,maxLat=Math.max(a.lat,b.lat)+0.15;
     const minLon=Math.min(a.lon,b.lon)-0.3,maxLon=Math.max(a.lon,b.lon)+0.3;
-    const box=`&boundary.rect.min_lat=${minLat}&boundary.rect.max_lat=${maxLat}&boundary.rect.min_lon=${minLon}&boundary.rect.max_lon=${maxLon}`;
-    const seen=new Set(),out=[];
-    // both spellings: "ferjekai" (nynorsk regions) and "fergekai" (bokmål)
-    for(const word of['ferjekai','fergekai']){
-      const r=await fetchRetry(`https://api.entur.io/geocoder/v1/autocomplete?text=${word}&size=40&layers=venue`+box,{headers:{'ET-Client-Name':'ferrynav-app'}});
-      const d=await r.json();
-      for(const f of(d.features||[])){
-        if(!f.properties.id?.startsWith('NSR:')||seen.has(f.properties.id))continue;
-        seen.add(f.properties.id);
-        out.push({name:f.properties.name,lat:f.geometry.coordinates[1],lon:f.geometry.coordinates[0]});
-      }
-    }
-    return out;
+    const q=`{stopPlacesByBbox(minimumLatitude:${minLat} maximumLatitude:${maxLat} minimumLongitude:${minLon} maximumLongitude:${maxLon} filterByInUse:true){id name latitude longitude transportMode}}`;
+    const r=await fetchRetry('https://api.entur.io/journey-planner/v3/graphql',{method:'POST',headers:{'Content-Type':'application/json','ET-Client-Name':'ferrynav-app'},body:JSON.stringify({query:q})});
+    const{data}=await r.json();
+    return(data?.stopPlacesByBbox||[])
+      .filter(s=>s?.name&&s.latitude&&s.longitude)
+      .filter(s=>(s.transportMode||[]).some(m=>String(m).toLowerCase()==='water'))
+      // car ferries only — "ferjekai"/"fergekai"/"ferjeleie", not express-boat
+      // or cruise quays you cannot drive onto
+      .filter(s=>/fer[jg]e/i.test(s.name))
+      .map(s=>({name:s.name,id:s.id,lat:s.latitude,lon:s.longitude}));
   }catch(e){return[];}
 }
 
 async function fetchOSRM(points,params){
   try{
     const cs=points.map(p=>p.lon+','+p.lat).join(';');
-    const r=await fetchRetry(`https://router.project-osrm.org/route/v1/driving/${cs}?steps=true&geometries=geojson&overview=full&`+params);
+    // no trailing "&" — the OSRM demo server rejects it as a malformed query
+    const qs='steps=true&geometries=geojson&overview=full'+(params?'&'+params:'');
+    const r=await fetchRetry(`https://router.project-osrm.org/route/v1/driving/${cs}?${qs}`);
     const d=await r.json();
     return d.code==='Ok'?(d.routes||[]):[];
   }catch(e){return [];}
@@ -385,12 +423,11 @@ async function routeOSRM(points){
     for(const p of[noFerry,noToll,noMotorway])if(p.length){routes=[p[0]];break;}
   }
   if(!routes.length)throw new Error('NOROUTE');
-  const dup=(a,b)=>Math.abs(a.duration-b.duration)<180&&Math.abs(a.distance-b.distance)<3000;
   const best=routes[0].duration;
   const consider=[...noFerry.filter(r=>!r.legs.some(l=>l.steps.some(st=>st.mode==='ferry'))),...noToll,...noMotorway];
   for(const extra of consider){
-    if(extra.duration>best*1.75)continue; // far slower than the fastest — not a realistic choice
-    if(routes.some(r=>dup(r,extra)))continue;
+    if(extra.duration>best*ALT_MAX)continue; // far slower than the fastest — not a realistic choice
+    if(routes.some(r=>sameCorridor(r,extra)))continue;
     routes.push(extra);
   }
   await addQuayDetours(points,routes,pts=>fetchOSRM(pts,''));
@@ -424,12 +461,9 @@ async function addQuayDetours(points,routes,probe){
     if(picked.length>=4)break;
   }
   const detours=await Promise.all(picked.map(c=>probe([a,c.q,b]).catch(()=>[])));
-  const dupLoose=x=>routes.some(r=>
-    Math.abs(r.duration-x.duration)<Math.max(600,best*0.08)&&
-    Math.abs(r.distance-x.distance)<Math.max(8000,routes[0].distance*0.08));
-  const extras=detours.flat().filter(x=>x&&x.duration<=best*1.75).sort((x,y)=>x.duration-y.duration);
+  const extras=detours.flat().filter(x=>x&&x.duration<=best*ALT_MAX).sort((x,y)=>x.duration-y.duration);
   for(const extra of extras){
-    if(dupLoose(extra))continue;
+    if(routes.some(r=>sameCorridor(r,extra)))continue;
     routes.push(extra);
   }
 }
@@ -445,12 +479,11 @@ async function googleFind(points){
   let routes=(main||[]).slice();
   if(!routes.length&&noFerry?.length)routes=[noFerry[0]];
   if(!routes.length)throw new Error('NOROUTE');
-  const dup=(x,y)=>Math.abs(x.duration-y.duration)<180&&Math.abs(x.distance-y.distance)<3000;
   const best=routes[0].duration;
   for(const nf of(noFerry||[])){
     if(nf.legs.some(l=>l.steps.some(st=>st.mode==='ferry')))continue;
-    if(nf.duration>best*1.75)continue;
-    if(routes.some(r=>dup(r,nf)))continue;
+    if(nf.duration>best*ALT_MAX)continue;
+    if(routes.some(r=>sameCorridor(r,nf)))continue;
     routes.push(nf);
   }
   await addQuayDetours(points,routes,pts=>googleRoutes(pts,{}).then(r=>r||[]));
@@ -544,6 +577,7 @@ async function reverseAddress(lat,lon){
 }
 
 // ── route planner ──────────────────────────────────────────────────────────
+function shortPlace(n){return(n||'').split(',')[0];}
 function shortStop(n){return n?n.replace(/\s*(ferjekai|fergekai|ferjeleie|fergeleie|kai)\s*$/i,'').trim():null;}
 
 // Earliest departure that makes sense for a plan: this minute when the trip
@@ -683,10 +717,10 @@ async function planAlternatives(opts){
   const out=settled.filter(s=>s.status==='fulfilled').map(s=>s.value);
   if(!out.length)throw new Error('NOROUTE');
   // Fastest real-world option first (incl. ferry waiting); drop routes
-  // that take far longer than the best — not real choices
+  // that take noticeably longer than the best — not real choices
   out.sort((a,b)=>a.total-b.total);
-  const bestTotal=out[0].total;
-  return out.filter(r=>r.total<=bestTotal*1.4);
+  const limit=altLimit(out[0].total);
+  return out.filter(r=>r.total<=limit).slice(0,ALT_KEEP);
 }
 
 // For every first-ferry departure today: leave home so you just catch it,
@@ -786,14 +820,14 @@ function rescheduleResult(R,anchor,margin,S,mode){
 }
 
 // ── MapView ────────────────────────────────────────────────────────────────
-function MapView({results,selIdx,selTotal,from,to,theme,onSelect}){
+function MapView({results,selIdx,selTotal,from,to,theme,controls,onSelect}){
   const cRef=useRef(null),mRef=useRef(null);
   useEffect(()=>{
     if(!cRef.current||!window.L)return;
     if(mRef.current){mRef.current.remove();mRef.current=null;}
     const dk=theme!=='light';
     const mAcc=dk?'#2BD9D0':'#0A9C93',mFer=dk?'#37C2F0':'#0E86C4',mGrey=dk?'#4a5763':'#9FB0C0';
-    const map=L.map(cRef.current,{zoomControl:false,attributionControl:false});
+    const map=L.map(cRef.current,{zoomControl:!!controls,attributionControl:false});
     L.tileLayer('https://{s}.basemaps.cartocdn.com/'+(dk?'dark_all':'light_all')+'/{z}/{x}/{y}{r}.png',{subdomains:'abcd',maxZoom:19}).addTo(map);
     const bounds=L.latLngBounds();
     // Unselected alternatives first: dim grey, tap to switch
@@ -822,7 +856,12 @@ function MapView({results,selIdx,selTotal,from,to,theme,onSelect}){
     const viaPoint=results[selIdx]?.viaPoint;
     if(viaPoint){L.marker([viaPoint.lat,viaPoint.lon],{icon:mk('var(--amber)','var(--amber)')}).addTo(map);bounds.extend([viaPoint.lat,viaPoint.lon]);}
     if(to){L.marker([to.lat,to.lon],{icon:mk(ACC,ACC)}).addTo(map);bounds.extend([to.lat,to.lon]);}
-    if(bounds.isValid())map.fitBounds(bounds,{padding:[28,28]});
+    // browser-mode preview before a route exists: one endpoint → zoom to it,
+    // none → frame the country
+    const lone=!results.length&&!!from!==!!to?(from||to):null;
+    if(lone)map.setView([lone.lat,lone.lon],9);
+    else if(bounds.isValid())map.fitBounds(bounds,{padding:[28,28]});
+    else map.setView([64.2,12.5],4);
     // Time badge per alternative — tap to select. Placed after the map is
     // framed so badges can slide along their route until they no longer
     // collide on screen (measured in pixels, not degrees).
@@ -869,7 +908,7 @@ function MapView({results,selIdx,selTotal,from,to,theme,onSelect}){
     }
     mRef.current=map;
     return()=>{if(vTimer)clearInterval(vTimer);if(mRef.current){mRef.current.remove();mRef.current=null;}};
-  },[results,selIdx,selTotal,from,to,theme]);
+  },[results,selIdx,selTotal,from,to,theme,controls]);
   return h('div',{ref:cRef,style:{width:'100%',height:'100%'}});
 }
 
@@ -896,7 +935,6 @@ function PlanScreen({from,to,via,fromText,toText,viaText,fromSugs,toSugs,viaSugs
   const sugsStyle={marginTop:6,borderRadius:10,overflow:'hidden',border:'1px solid var(--border)'};
   const sugItem=(s,i,cb)=>h('div',{key:i,onClick:cb,style:{padding:'10px 14px',cursor:'pointer',background:i%2?'var(--suga)':'var(--sugb)',fontSize:13,color:'var(--txt)',display:'flex',gap:8,alignItems:'center'}},
     h('span',{style:{color:MUT,fontSize:11}},'⌖'),s.name);
-  const shortName=n=>(n||'').split(',')[0];
 
   return h('div',{className:'scroll-hide',style:{position:'absolute',inset:0,overflowY:'auto',paddingBottom:'calc(84px + env(safe-area-inset-bottom))'}},
     // status bar
@@ -964,7 +1002,7 @@ function PlanScreen({from,to,via,fromText,toText,viaText,fromSugs,toSugs,viaSugs
           h('div',{onClick:e=>{e.stopPropagation();on('toggleFav',r);},
             style:{fontSize:17,color:r.fav?'var(--amber)':'var(--dim)',flex:'none',width:26,textAlign:'center',lineHeight:1}},r.fav?'★':'☆'),
           h('div',{style:{flex:1,minWidth:0}},
-            h('div',{style:{fontSize:13,fontWeight:600,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}},shortName(r.from.name)+' → '+shortName(r.to.name))
+            h('div',{style:{fontSize:13,fontWeight:600,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}},shortPlace(r.from.name)+' → '+shortPlace(r.to.name))
           ),
           h('div',{style:{color:MUT,fontSize:15,flex:'none'}},'›')
         ))
@@ -1024,7 +1062,19 @@ function PlanScreen({from,to,via,fromText,toText,viaText,fromSugs,toSugs,viaSugs
 }
 
 // ── ResultsScreen ──────────────────────────────────────────────────────────
-function ResultsScreen({results,selIdx,result,mode,margin,timeMin,shared,vehicle,T,theme,on}){
+// Map with the route overlays. On phones it sits above the bottom sheet
+// (which overlaps its lower edge); in browser mode it fills the right pane.
+function MapPane({results,selIdx,R,from,to,T,theme,inset,on}){
+  const bottom=inset?32:16;
+  return h('div',{style:{position:'absolute',inset:0,overflow:'hidden'}},
+    h(MapView,{results,selIdx,selTotal:R?.total,from:R?.from||from,to:R?.to||to,theme,controls:!inset,onSelect:i=>on('selAlt',i)}),
+    R?h('div',{style:{position:'absolute',right:16,top:'calc(14px + env(safe-area-inset-top))',padding:'7px 13px',borderRadius:30,background:'var(--glass)',backdropFilter:'blur(6px)',fontSize:12,fontWeight:600,border:'1px solid var(--border)',zIndex:400}},R.numFerries?T.ferriesN(R.numFerries):T.noFerryB):null,
+    R?.isLive?h('div',{style:{position:'absolute',right:16,bottom,padding:'4px 10px',borderRadius:20,background:'rgba(43,217,208,.2)',border:'1px solid '+ACC,fontSize:10,fontWeight:700,color:ACC,zIndex:400,letterSpacing:'.06em'}},T.liveData):null,
+    R?h('div',{onClick:()=>on('startNav'),style:{position:'absolute',left:16,bottom,padding:'10px 18px',borderRadius:24,background:ACC,color:'var(--onacc)',fontSize:13,fontWeight:700,fontFamily:"'Space Grotesk',sans-serif",cursor:'pointer',zIndex:400,boxShadow:'0 4px 16px rgba(43,217,208,.4)'}},'▶ '+T.navStart):null
+  );
+}
+
+function ResultsScreen({results,selIdx,result,mode,margin,timeMin,shared,vehicle,T,lang,theme,wide,on}){
   const R=result||results[selIdx];
   // Arrive-by mode: arriving later than requested is flagged in red
   const late=mode==='arrive'&&R.arrive>timeMin;
@@ -1034,19 +1084,27 @@ function ResultsScreen({results,selIdx,result,mode,margin,timeMin,shared,vehicle
   // Fare recomputed live from the chosen vehicle type
   const cost=R.ferries.reduce((s,f)=>s+(f.km!=null?ferryFare(f.km,vehicle):f.fare),0);
   const vehIcon={car:'🚗',ev:'⚡',mc:'🏍',long:'🚐'}[vehicle]||'🚗';
+  // In browser mode the map lives in its own pane, so the sheet is the whole
+  // screen: no rounded lip over the map and no drag handle.
+  const sheetShell=wide
+    ?{flex:1,minHeight:0,background:'var(--sheet)',position:'relative',display:'flex',flexDirection:'column',overflow:'hidden'}
+    :{flex:1,minHeight:0,background:'var(--sheet)',borderRadius:'26px 26px 0 0',marginTop:-22,position:'relative',display:'flex',flexDirection:'column',overflow:'hidden',zIndex:2};
   return h('div',{style:{position:'absolute',left:0,right:0,top:0,bottom:'calc(74px + env(safe-area-inset-bottom))',display:'flex',flexDirection:'column'}},
     // Map — shrinks with the viewport so the timeline keeps room on phones
-    h('div',{style:{position:'relative',height:'clamp(160px,28vh,272px)',flex:'none',overflow:'hidden'}},
-      h(MapView,{results,selIdx,selTotal:R.total,from:R.from,to:R.to,theme,onSelect:i=>on('selAlt',i)}),
-      h('div',{style:{position:'absolute',right:16,top:'calc(14px + env(safe-area-inset-top))',padding:'7px 13px',borderRadius:30,background:'var(--glass)',backdropFilter:'blur(6px)',fontSize:12,fontWeight:600,border:'1px solid var(--border)',zIndex:400}},R.numFerries?T.ferriesN(R.numFerries):T.noFerryB),
-      R.isLive&&h('div',{style:{position:'absolute',right:16,bottom:32,padding:'4px 10px',borderRadius:20,background:'rgba(43,217,208,.2)',border:'1px solid '+ACC,fontSize:10,fontWeight:700,color:ACC,zIndex:400,letterSpacing:'.06em'}},T.liveData),
-      // sits above the sheet's rounded top, which overlaps the map by 22px
-      h('div',{onClick:()=>on('startNav'),style:{position:'absolute',left:16,bottom:32,padding:'10px 18px',borderRadius:24,background:ACC,color:'var(--onacc)',fontSize:13,fontWeight:700,fontFamily:"'Space Grotesk',sans-serif",cursor:'pointer',zIndex:400,boxShadow:'0 4px 16px rgba(43,217,208,.4)'}},'▶ '+T.navStart)
+    wide?null:h('div',{style:{position:'relative',height:'clamp(160px,28vh,272px)',flex:'none'}},
+      h(MapPane,{results,selIdx,R,T,theme,inset:true,on})
     ),
-    // Bottom sheet: fixed rounded shell, scrolling content clipped inside it
-    h('div',{style:{flex:1,minHeight:0,background:'var(--sheet)',borderRadius:'26px 26px 0 0',marginTop:-22,position:'relative',display:'flex',flexDirection:'column',overflow:'hidden',zIndex:2}},
-      h('div',{style:{width:38,height:4,borderRadius:2,background:'var(--line)',margin:'10px auto 8px',flex:'none'}}),
-      h('div',{className:'scroll-hide',style:{flex:1,minHeight:0,overflowY:'auto',WebkitOverflowScrolling:'touch',padding:'4px 20px 0',display:'flex',flexDirection:'column'}},
+    // Bottom sheet: fixed shell, scrolling content clipped inside it
+    h('div',{style:sheetShell},
+      wide?null:h('div',{style:{width:38,height:4,borderRadius:2,background:'var(--line)',margin:'10px auto 8px',flex:'none'}}),
+      // browser mode has no plan header above it — keep the route and the
+      // language/theme switch in reach
+      wide?h('div',{style:{flex:'none',display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,padding:'calc(14px + env(safe-area-inset-top)) 22px 10px',borderBottom:'1px solid var(--border2)'}},
+        h('div',{style:{minWidth:0,fontSize:13,fontWeight:600,fontFamily:"'Space Grotesk',sans-serif",whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}},
+          shortPlace(R.from.name)+' → '+shortPlace(R.to.name)),
+        h(LangToggle,{lang,theme,on})
+      ):null,
+      h('div',{className:'scroll-hide',style:{flex:1,minHeight:0,overflowY:'auto',WebkitOverflowScrolling:'touch',padding:wide?'14px 22px 0':'4px 20px 0',display:'flex',flexDirection:'column'}},
       // Route alternatives (ferry vs. driving around) — tap to switch
       results.length>1&&h('div',{className:'scroll-hide',style:{display:'flex',gap:8,marginBottom:14,overflowX:'auto',flex:'none'}},
         results.map((r,i)=>{
@@ -1140,7 +1198,9 @@ function ResultsScreen({results,selIdx,result,mode,margin,timeMin,shared,vehicle
         ))
       ),
       // Footer (price opens the vehicle picker)
-      h('div',{style:{position:'sticky',bottom:0,background:'var(--sheet)',borderTop:'1px solid var(--border2)',marginTop:4}},
+      // marginTop:auto keeps the fare row at the foot of the panel when the
+      // timeline is short, sticky keeps it there when it scrolls
+      h('div',{style:{position:'sticky',bottom:0,background:'var(--sheet)',borderTop:'1px solid var(--border2)',marginTop:'auto',paddingTop:4}},
         vehOpen&&h('div',{style:{display:'flex',gap:6,padding:'10px 0 2px',flexWrap:'wrap'}},
           [['car','🚗',T.vehCar],['ev','⚡',T.vehEv],['mc','🏍',T.vehMc],['long','🚐',T.vehLong]].map(([k,ic,lb])=>
             h('div',{key:k,onClick:()=>{on('vehicle',k);setVehOpen(false);},
@@ -1490,12 +1550,14 @@ function App(){
   const [now,setNow]=useState(nowMinutes);
   const [shared,setShared]=useState(false);
   const [mobile,setMobile]=useState(()=>window.matchMedia('(max-width:520px)').matches);
+  // browser mode: room for a panel and a full-height map side by side
+  const [wide,setWide]=useState(()=>window.matchMedia('(min-width:900px)').matches);
 
   useEffect(()=>{
-    const mq=window.matchMedia('(max-width:520px)');
-    const f=e=>setMobile(e.matches);
-    mq.addEventListener('change',f);
-    return()=>mq.removeEventListener('change',f);
+    const small=window.matchMedia('(max-width:520px)'),big=window.matchMedia('(min-width:900px)');
+    const fs=e=>setMobile(e.matches),fb=e=>setWide(e.matches);
+    small.addEventListener('change',fs);big.addEventListener('change',fb);
+    return()=>{small.removeEventListener('change',fs);big.removeEventListener('change',fb);};
   },[]);
 
   useEffect(()=>{const id=setInterval(()=>setNow(nowMinutes()),60000);return()=>clearInterval(id);},[]);
@@ -1710,19 +1772,34 @@ function App(){
     }
   }
 
-  const inner=h('div',{style:{width:'100%',height:'100%',overflow:'hidden',background:'var(--bg)',position:'relative',color:'var(--txt)',fontFamily:"'DM Sans',sans-serif"}},
-    screen==='plan'&&h(PlanScreen,{from,to,via,fromText,toText,viaText,fromSugs,toSugs,viaSugs,showVia,date,mode,timeMin,margin,now,loading,error,recents,geoLoading,T,lang,theme,on}),
-    screen==='results'&&result&&h(ResultsScreen,{results,selIdx,result,mode,margin,timeMin,shared,vehicle,T,theme,on}),
-    screen==='timetable'&&result&&h(TimetableScreen,{result,selectedFerry,now,T,lang,theme,on}),
-    screen==='nextferry'&&h(NextFerryScreen,{T,lang,now,nfText,nfSugs,nfStop,nfDeps,nfLoading,theme,on}),
-    screen==='nav'&&result&&h(NavScreen,{R:result,now,margin,lang,T,on}),
-    h(TabBar,{screen,hasResult:!!result,T,on})
-  );
+  // Navigation takes the whole window — it is a driving view, not a panel
+  const navMode=screen==='nav'&&!!result;
+  const split=wide&&!navMode;
+
+  const panel=[
+    screen==='plan'&&h(PlanScreen,{key:'plan',from,to,via,fromText,toText,viaText,fromSugs,toSugs,viaSugs,showVia,date,mode,timeMin,margin,now,loading,error,recents,geoLoading,T,lang,theme,on}),
+    screen==='results'&&result&&h(ResultsScreen,{key:'res',results,selIdx,result,mode,margin,timeMin,shared,vehicle,T,lang,theme,wide:split,on}),
+    screen==='timetable'&&result&&h(TimetableScreen,{key:'tt',result,selectedFerry,now,T,lang,theme,on}),
+    screen==='nextferry'&&h(NextFerryScreen,{key:'nf',T,lang,now,nfText,nfSugs,nfStop,nfDeps,nfLoading,theme,on}),
+    navMode&&h(NavScreen,{key:'nav',R:result,now,margin,lang,T,on}),
+    h(TabBar,{key:'tabs',screen,hasResult:!!result,T,on})
+  ];
+
+  const frame={width:'100%',height:'100%',overflow:'hidden',background:'var(--bg)',position:'relative',color:'var(--txt)',fontFamily:"'DM Sans',sans-serif"};
+  // Browser mode: controls in a fixed-width panel, map filling the rest.
+  // The map keeps showing the planned route while you browse the other tabs.
+  const inner=split
+    ?h('div',{style:{...frame,display:'flex'}},
+        h('div',{style:{width:PANEL_W,flex:'none',position:'relative',borderRight:'1px solid var(--border)'}},panel),
+        h('div',{style:{flex:1,minWidth:0,position:'relative',background:'var(--bg2)'}},
+          h(MapPane,{results:results||EMPTY,selIdx,R:result,from,to,T,theme,inset:false,on}))
+      )
+    :h('div',{style:frame},panel);
 
   // Full screen on phones (100dvh follows the mobile browser chrome);
-  // full-height centered column on iPad/PC
+  // centered column on iPad, wide two-pane window on a desktop browser
   return h('div',{style:{position:'fixed',inset:0,height:'100dvh',background:'var(--bg2)',display:'flex',justifyContent:'center'}},
-    h('div',{style:{width:'100%',maxWidth:mobile?'100%':560,height:'100%',position:'relative',overflow:'hidden',background:'var(--bg)',
+    h('div',{style:{width:'100%',maxWidth:mobile?'100%':(split?1280:560),height:'100%',position:'relative',overflow:'hidden',background:'var(--bg)',
       boxShadow:mobile?'none':(theme==='light'?'0 0 44px rgba(20,35,50,.16)':'0 0 70px rgba(0,0,0,.65)')}},inner)
   );
 }

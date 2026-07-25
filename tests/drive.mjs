@@ -61,11 +61,15 @@ const d = await dctx.newPage();
 d.on('pageerror', e => errors.push('desktop pageerror: ' + e.message));
 await d.goto(BASE, { waitUntil: 'domcontentloaded' });
 await d.waitForSelector('input[type=text]', { timeout: 10000 });
-const fw = await d.evaluate(() => {
-  const el = document.querySelector('#root > div > div');
-  return el ? el.getBoundingClientRect().width : 0;
+const layout = await d.evaluate(() => {
+  const win = document.querySelector('#root > div > div');
+  const inner = win && win.firstElementChild;
+  const panes = inner ? [...inner.children].map(c => Math.round(c.getBoundingClientRect().width)) : [];
+  return { win: win ? Math.round(win.getBoundingClientRect().width) : 0, panes };
 });
-console.log('desktop frame width:', fw, fw === 560 ? 'OK centered column' : 'FAIL');
+// browser mode: control panel on the left, map filling the rest
+const twoPane = layout.win === 1280 && layout.panes[0] === 440 && layout.panes[1] === 840;
+console.log('desktop layout:', JSON.stringify(layout), twoPane ? 'OK panel + map' : 'FAIL');
 await d.screenshot({ path: SHOT + '/4-desktop.png' });
 await dctx.close();
 

@@ -11,7 +11,10 @@ await p.goto('http://127.0.0.1:8741/index.html', { waitUntil: 'domcontentloaded'
 await p.evaluate(() => { localStorage.clear(); localStorage.setItem('fn_gmaps_key', 'mock-key'); });
 await p.reload({ waitUntil: 'domcontentloaded' });
 await p.waitForSelector('input[type=text]');
-await p.locator('div:text-is("Ankomst")').click();
+// fixed departure so ferry waiting — and therefore which alternatives are
+// close enough to be shown — does not depend on when the test runs
+await p.locator('div:text-is("Kl.")').click();
+await p.locator('input[type=time]').fill('10:00');
 const inputs = p.locator('input[type=text]');
 await inputs.nth(0).fill('Bergen');
 await p.locator('text=Bergen, Vestland').first().click();

@@ -49,35 +49,42 @@ const nowDep = await big();
 console.log('mode Nå departs now:', Math.abs(toMin(nowDep) - nowMin) <= 1 ? 'OK ' + nowDep : 'FAIL ' + nowDep + ' vs now ' + String(nowMin));
 const nowArr = await arrival();
 
+// The clock-based modes are planned for tomorrow so ferry waiting — and the
+// numbers asserted below — do not depend on when the suite runs.
+const TOMORROW = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Oslo' }).format(new Date(Date.now() + 86400000));
+const setDay = () => p.locator('input[type=date]').fill(TOMORROW);
+
 // 2. Avreise kl. → leaves exactly at the chosen time, even with a ferry later
 await backToPlan();
 await p.locator('div:text-is("Kl.")').click();
+await setDay();
 await p.locator('input[type=time]').fill('11:07');
 await plan();
-const atDep = await big();
+const atDep = await big(), atArr = await arrival();
 console.log('mode Kl. departs exactly:', atDep === '11:07' ? 'OK 11:07' : 'FAIL ' + atDep);
+const atTotal = toMin(atArr) - toMin(atDep);
 
-// 3. Innen → best departure between now and the deadline
+// 3. Innen → the best departure between the start of the day and the deadline
 await backToPlan();
 await p.locator('div:text-is("Innen")').click();
+await setDay();
 await p.locator('input[type=time]').fill('14:00');
 await plan();
 const byDep = await big(), byArr = await arrival();
-const inWindow = toMin(byDep) >= nowMin - 1 && toMin(byDep) <= 14 * 60;
-console.log('mode Innen inside window:', inWindow ? 'OK ' + byDep + ' → ' + byArr : 'FAIL ' + byDep);
-// same ferry, but you leave as late as you can get away with (equal only when
-// "now" already happens to be the perfectly aligned minute)
-console.log('mode Innen beats Nå (less waiting, same arrival):',
-  byArr === nowArr && toMin(byDep) >= toMin(nowDep) ? 'OK ' + nowDep + '→' + byDep : 'FAIL ' + nowDep + '/' + nowArr + ' vs ' + byDep + '/' + byArr);
+console.log('mode Innen inside window:', toMin(byDep) <= 14 * 60 ? 'OK ' + byDep + ' → ' + byArr : 'FAIL ' + byDep);
+const byTotal = toMin(byArr) - toMin(byDep);
+console.log('mode Innen wastes less time than a fixed departure:',
+  byTotal <= atTotal ? `OK ${byTotal} min vs ${atTotal} min` : `FAIL ${byTotal} min vs ${atTotal} min`);
 
 // 4. Ankomst → arrive by the chosen time
 await backToPlan();
 await p.locator('div:text-is("Ankomst")').click();
+await setDay();
 await p.locator('input[type=time]').fill('19:00');
 await plan();
 const arrDep = await big(), arrArr = await arrival();
 console.log('mode Ankomst arrives in time:', toMin(arrArr) <= 19 * 60 ? 'OK ' + arrDep + ' → ' + arrArr : 'FAIL ' + arrArr);
-console.log('mode Ankomst leaves late:', toMin(arrDep) > toMin(byDep) ? 'OK ' + arrDep : 'FAIL ' + arrDep);
+console.log('mode Ankomst leaves as late as it can:', toMin(arrDep) > toMin(byDep) ? 'OK ' + arrDep : 'FAIL ' + arrDep);
 const label = await p.evaluate(() => [...document.querySelectorAll('div')].some(e => e.textContent === 'Avreise senest'));
 console.log('arrive-by label:', label ? 'OK' : 'FAIL');
 

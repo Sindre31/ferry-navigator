@@ -13,12 +13,13 @@ Norsk fergeplanlegger for bilturer. Skriv inn hvor du skal — appen finner rute
   - **Innen kl.** — appen finner det beste avreisetidspunktet mellom nå og klokkeslettet (minst mulig venting)
   - **Kl.** — du drar presis på klokkeslettet, eventuell venting havner på fergekaia
   - **Ankomst kl.** — baklengs-planlegging: seneste avreise som gir ankomst i tide
-- **Rutealternativer** — ferge vs. kjøre rundt når begge er realistiske, som trykkbare kort og linjer på kartet
+- **Rutealternativer** — ferge vs. kjøre rundt når begge er realistiske, som trykkbare kort og linjer på kartet. Parallelle fergekorridorer (f.eks. E39 over Anda–Lote) hentes fram ved å prøve ruter via fergekaiene i korridoren, og alternativer skilles på geografi — ikke på reisetid — så to ulike veier som tar like lang tid ikke slås sammen. Bare reelle valg vises: alternativer som tar mye lengre tid enn det beste filtreres bort
 - **Velg avgang** — de neste fergeavgangene vises som chips i tidslinjen; velg en annen og hele planen regnes om
 - **Rutetabell neste døgn** — fungerer over midnatt, morgendagens avganger merket «I MORGEN»
 - **Neste ferge** — søk opp en fergekai og se neste avganger med nedtelling, uten å planlegge rute
 - **Prisestimat** — AutoPASS-basert estimat per kryssing, justert for kjøretøytype (bil / el-bil / MC / over 6 m)
 - **Via-punkt**, **min posisjon** (GPS), **favoritter og nylige søk**, **delbare lenker** (hele ruten i URL-en)
+- **Tilpasset skjermen** — fullskjerm på mobil, sentrert kolonne på iPad, og i nettleser på PC et to-delt oppsett med panel til venstre og stort kart til høyre
 - **Installerbar PWA** — legg til på hjemskjerm, med offline-fallback via service worker
 - **Norsk og engelsk** UI (NO/EN-bryter, huskes)
 - **Lys modus som standard**, mørk modus ett trykk unna (☀️/🌙-bryteren, huskes)
