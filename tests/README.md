@@ -23,9 +23,9 @@ Testene forventer `index.html` med:
 | drive.mjs | Mobil fullskjerm, planlegging, deling, delt lenke, SW |
 | drive2 | Rutealternativer, bytte, fergenavn A–B |
 | drive4 | Min posisjon, via-punkt, pris, avvik, favoritter |
-| drive5 | Avreisemodus, EN/NO, avgangschips |
+| drive5 | Avreisemodus, EN/NO, avgangschips, neste ferge |
 | drive6 | Velg avgang frem/tilbake |
-| drive7 | Kjøretøytype-pris |
+| drive7 | Kjøretøytype-pris (velger i resultatfoten) |
 | drive8 | Slider fjernet, tidsinput, favoritter-persistens |
 | drive9 | −5 min buffer |
 | drive10 | Kaiankomst, favoritter fra/til, standardmodus |
@@ -34,7 +34,7 @@ Testene forventer `index.html` med:
 | drive13 | Karttid oppdateres ved fergebytte |
 | drive14 | Navigasjonsmodus (GPS-simulering) |
 | drive15 | Ferge 1 flytter avreise; ferge 2 varsler |
-| drive16 | Avreise justeres til ferge, meny, iPad-oppsett |
+| drive16 | Avreise kl. er presis, meny, iPad-oppsett |
 | drive17 | Beste avreisetider |
 | drive18 | Lys modus (standard) + bytte til mørk |
 | drive19 | Auto-oppdatering, omruting, live fartøy, offline-plan |
@@ -42,10 +42,6 @@ Testene forventer `index.html` med:
 
 Screenshots havner i `$SHOT_DIR` (standard `/tmp/ferrynav-shots`).
 
-### Kjente utdaterte tester
-
-`drive4`, `drive5`, `drive6` og `drive7` feiler på UI som er endret siden de ble
-skrevet (tilbake-knapp i rutetabellen, 🔔-varsler, kjøretøyvelger på plan-skjermen,
-forventning om at «velg tidligere avgang» går tilbake til utgangspunktet). De
-feilet likt før tidsmodus-endringen — funksjonaliteten dekkes av `drive8`,
-`drive15` og `drive16`.
+Alle 20 testene skal være grønne. `mock.html` genererer rutetider for i dag og i
+morgen i Oslo-tid, slik at appen bruker «live» data (ikke demo-rutene) og
+innstilte avganger havner innenfor rutetabellens vindu uansett når testene kjøres.

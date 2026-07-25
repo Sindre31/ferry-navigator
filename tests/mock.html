@@ -26,9 +26,11 @@
       gStep('drive',6000,80000,[5.60,61.15],[5.60,61.15]),
       gStep('ferry',900,4000,[5.60,61.15],[5.53,61.11]),
       gStep('drive',3600,50000,[5.53,61.11],[6.15,62.47])]}]};
+  // the no-ferry alternative stays clearly slower than the ferry route even
+  // with a worst-case wait at the quay, so route order never depends on the clock
   const gNoFerry={summary:'E16, Rv5',overview_path:[LL(5.32,60.39),LL(6.40,61.20),LL(6.15,62.47)],
-    legs:[{duration:{value:16800},distance:{value:310000},steps:[
-      gStep('drive',16800,310000,[5.32,60.39],[6.15,62.47])]}]};
+    legs:[{duration:{value:19200},distance:{value:310000},steps:[
+      gStep('drive',19200,310000,[5.32,60.39],[6.15,62.47])]}]};
   window.google={maps:{TravelMode:{DRIVING:'DRIVING'},DirectionsService:function(){
     this.route=(req,cb)=>setTimeout(()=>{
       if(req.avoidFerries)return cb({routes:[gNoFerry]},'OK');
@@ -38,8 +40,27 @@
     },10);
   }}};
   const realFetch=window.fetch;
-  const iso=(day,h,m)=>`2026-07-${String(day).padStart(2,'0')}T${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:00+02:00`;
-  const deps=[];for(const day of[8,9])for(let t=6*60;t<=22*60;t+=40)deps.push({expectedDepartureTime:iso(day,Math.floor(t/60),t%60)});
+  // Schedules are generated for today/tomorrow in Oslo — pinned dates would
+  // fall outside the app's window and silently degrade to the demo grid
+  const pad=n=>String(n).padStart(2,'0');
+  const osloDay=off=>new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Oslo'}).format(new Date(Date.now()+off*86400000));
+  const osloOffset=off=>{
+    const s=new Intl.DateTimeFormat('en',{timeZone:'Europe/Oslo',timeZoneName:'longOffset'}).format(new Date(Date.now()+off*86400000));
+    const m=/GMT([+-]\d\d:\d\d)/.exec(s);
+    return m?m[1]:'+01:00';
+  };
+  const iso=(day,h,m)=>`${osloDay(day)}T${pad(h)}:${pad(m)}:00${osloOffset(day)}`;
+  const nowOslo=(()=>{
+    const q=new Intl.DateTimeFormat('en',{timeZone:'Europe/Oslo',hour:'numeric',minute:'numeric',hour12:false}).formatToParts(new Date());
+    const hh=+q.find(x=>x.type==='hour').value%24;
+    return hh*60+ +q.find(x=>x.type==='minute').value;
+  })();
+  const deps=[],depMin=[];
+  for(const day of[0,1])for(let t=6*60;t<=22*60;t+=40){deps.push({expectedDepartureTime:iso(day,Math.floor(t/60),t%60)});depMin.push(day*1440+t);}
+  // one cancelled departure a few hours out, so it always lands inside the
+  // timetable window whatever time of day the tests run
+  const cancelIdx=Math.max(0,depMin.findIndex(t=>t>=nowOslo+180));
+  const CANCELLED=deps[cancelIdx].expectedDepartureTime;
   window.fetch=function(url,opts){
     url=String(url);
     const json=o=>Promise.resolve(new Response(JSON.stringify(o),{status:200,headers:{'Content-Type':'application/json'}}));
@@ -68,12 +89,12 @@
       const body=String((opts&&opts.body)||'');
       const useAlt=body.includes('NSR:StopPlace:2');
       const list=useAlt
-        ?(()=>{const a=[];for(const day of[8,9])for(let t=6*60+10;t<=22*60;t+=60)a.push({expectedDepartureTime:iso(day,Math.floor(t/60),t%60)});return a;})()
+        ?(()=>{const a=[];for(const day of[0,1])for(let t=6*60+10;t<=22*60;t+=60)a.push({expectedDepartureTime:iso(day,Math.floor(t/60),t%60)});return a;})()
         :deps;
       return json({data:{stopPlace:{
         situations:[{summary:[{value:'Redusert kapasitet på sambandet',language:'no'}]}],
         estimatedCalls:list.map(d=>({expectedDepartureTime:d.expectedDepartureTime,
-          cancellation:d.expectedDepartureTime==='2026-07-08T16:00:00+02:00'}))
+          cancellation:d.expectedDepartureTime===CANCELLED}))
       }}});
     }
     if(url.includes('router.project-osrm.org')){
@@ -84,10 +105,10 @@
           {mode:'ferry',name:'Lavik-Oppedal',duration:1200,distance:5000,geometry:{coordinates:[[5.53,61.11],[5.60,61.15]]}},
           {mode:'driving',duration:7800,distance:135000,geometry:{coordinates:[[5.60,61.15],[6.15,62.47]]}}
         ]}]};
-      const noFerryRoute={duration:16800,distance:310000,
+      const noFerryRoute={duration:19200,distance:310000,
         geometry:{coordinates:[[5.32,60.39],[6.40,61.20],[6.15,62.47]]},
         legs:[{summary:'E16, Rv5',steps:[
-          {mode:'driving',duration:16800,distance:310000,geometry:{coordinates:[[5.32,60.39],[6.40,61.20],[6.15,62.47]]}}
+          {mode:'driving',duration:19200,distance:310000,geometry:{coordinates:[[5.32,60.39],[6.40,61.20],[6.15,62.47]]}}
         ]}]};
       return json({code:'Ok',routes:url.includes('exclude=ferry')?[noFerryRoute]:[ferryRoute]});
     }

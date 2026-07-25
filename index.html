@@ -1548,7 +1548,8 @@ function App(){
         if(saved.mode)setMode(saved.mode);
         if(saved.timeMin!=null)setTimeMin(saved.timeMin);
         if(saved.margin!=null)setMargin(saved.margin);
-        if(saved.vehicle&&VEHICLES[saved.vehicle])setVehicle(saved.vehicle);
+        // vehicle is a standing preference (fn_vehicle) — a plan saved before
+        // the user switched vehicle must not roll it back
       }
       return;
     }

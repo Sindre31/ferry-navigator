@@ -8,7 +8,7 @@ const browser = await chromium.launch();
 const errors = [];
 const ctx = await browser.newContext({
   viewport: { width: 390, height: 780 }, isMobile: true, hasTouch: true,
-  permissions: ['notifications', 'clipboard-write', 'clipboard-read'],
+  permissions: ['clipboard-write', 'clipboard-read'],
 });
 const p = await ctx.newPage();
 p.on('pageerror', e => errors.push('pageerror: ' + e.message));
@@ -43,24 +43,17 @@ await p.locator('text=Finn rute').click();
 await p.waitForFunction(() => [...document.querySelectorAll('div')].some(e => e.style.fontSize === '46px'), null, { timeout: 10000 });
 
 // 4. Departure picker chips on the ferry step (12px mono cursor divs)
-const chipSel = els => els.filter(e => e.children.length === 0 && /^\d\d:\d\d( \+1)?$/.test(e.textContent) && e.style.cursor === 'pointer' && e.style.fontSize === '12px');
 const chips = await p.$$eval('div', els => els.filter(e => e.children.length === 0 && /^\d\d:\d\d( \+1)?$/.test(e.textContent) && e.style.cursor === 'pointer' && e.style.fontSize === '12px').map(e => e.textContent));
 console.log('dep chips:', chips.length > 1 ? 'OK ' + chips.join(' ') : 'FAIL');
 const leaveBefore = await p.$$eval('div', els => els.find(e => e.style.fontSize === '46px').textContent);
 await p.$$eval('div', els => { const c = els.filter(e => e.children.length === 0 && /^\d\d:\d\d( \+1)?$/.test(e.textContent) && e.style.cursor === 'pointer' && e.style.fontSize === '12px'); c[1].click(); });
 await p.waitForTimeout(400);
 const leaveAfter = await p.$$eval('div', els => els.find(e => e.style.fontSize === '46px').textContent);
-console.log('pick later ferry:', leaveAfter !== leaveBefore ? `OK leaveBy ${leaveBefore} → ${leaveAfter}` : 'FAIL unchanged');
+console.log('pick another departure:', leaveAfter !== leaveBefore ? `OK leaveBy ${leaveBefore} → ${leaveAfter}` : 'FAIL unchanged');
 await p.screenshot({ path: SHOT + '/14-pick-departure.png' });
 
-// 5. Notify button
-await p.locator('div:has-text("🔔")').last().click();
-await p.waitForTimeout(600);
-const notifSet = await p.locator('text=🔔 ').count();
-console.log('notify scheduled:', notifSet >= 1 ? 'OK shows time' : 'FAIL');
-
-// 6. Next ferry screen via tab
-await p.locator('div:text-is("‹")').first().click(); // back to plan
+// 5. Next ferry screen via tab
+await p.locator('div:text-is("Plan")').click(); // tab bar → plan
 await p.waitForSelector('text=Finn rute', { timeout: 5000 });
 await p.locator('div:text-is("Neste")').click();
 await p.waitForSelector('text=Neste ferge', { timeout: 5000 });

@@ -65,8 +65,10 @@ await plan();
 const byDep = await big(), byArr = await arrival();
 const inWindow = toMin(byDep) >= nowMin - 1 && toMin(byDep) <= 14 * 60;
 console.log('mode Innen inside window:', inWindow ? 'OK ' + byDep + ' → ' + byArr : 'FAIL ' + byDep);
+// same ferry, but you leave as late as you can get away with (equal only when
+// "now" already happens to be the perfectly aligned minute)
 console.log('mode Innen beats Nå (less waiting, same arrival):',
-  byArr === nowArr && toMin(byDep) > toMin(nowDep) ? 'OK ' + nowDep + '→' + byDep : 'FAIL ' + nowDep + '/' + nowArr + ' vs ' + byDep + '/' + byArr);
+  byArr === nowArr && toMin(byDep) >= toMin(nowDep) ? 'OK ' + nowDep + '→' + byDep : 'FAIL ' + nowDep + '/' + nowArr + ' vs ' + byDep + '/' + byArr);
 
 // 4. Ankomst → arrive by the chosen time
 await backToPlan();

@@ -57,14 +57,14 @@ const ttAlert = await p.locator('text=Redusert kapasitet').count();
 console.log('timetable: cancelled', cancelled >= 1 ? 'OK' : 'FAIL', '| alert box', ttAlert >= 1 ? 'OK' : 'FAIL');
 await p.screenshot({ path: SHOT + '/11-timetable-cancelled.png' });
 
-// 7. Recents: back to plan, row should exist; toggle favorite
-await p.locator('div:text-is("‹")').first().click(); // back to results
+// 7. Recents: back to plan, row should exist (from/to only); toggle favorite
+await p.locator('div:text-is("‹")').first().click(); // timetable → results
 await p.waitForFunction(() => [...document.querySelectorAll('div')].some(e => e.style.fontSize === '46px'), null, { timeout: 5000 });
-await p.locator('div:text-is("‹")').first().click(); // back to plan
+await p.locator('div:text-is("Plan")').click(); // tab bar → plan
 await p.waitForSelector('text=Finn rute', { timeout: 5000 });
 const recentRow = await p.locator('text=Testveien 1 → Ålesund').count();
 const recentVia = await p.locator('text=via Førde').count();
-console.log('recents row:', recentRow >= 1 && recentVia >= 1 ? 'OK with via' : `FAIL (row=${recentRow}, via=${recentVia})`);
+console.log('recents row:', recentRow >= 1 && recentVia === 0 ? 'OK from/to only' : `FAIL (row=${recentRow}, via=${recentVia})`);
 await p.locator('div:text-is("☆")').first().click();
 const starred = await p.locator('div:text-is("★")').count();
 console.log('favorite toggle:', starred >= 1 ? 'OK' : 'FAIL');
@@ -75,9 +75,14 @@ await p.reload({ waitUntil: 'domcontentloaded' });
 await p.waitForSelector('text=Finn rute', { timeout: 10000 });
 const persisted = await p.locator('div:text-is("★")').count();
 console.log('recents persist reload:', persisted >= 1 ? 'OK still favorite' : 'FAIL');
+// tapping a recent only fills the fields — planning stays an explicit action
 await p.locator('text=Testveien 1 → Ålesund').first().click();
+await p.waitForTimeout(300);
+const filled = await p.$$eval('input[type=text]', els => els.slice(0, 2).map(e => e.value));
+console.log('tap recent fills fields:', filled[0].startsWith('Testveien 1') && filled[1].startsWith('Ålesund') ? 'OK ' + filled.join(' → ') : 'FAIL ' + filled.join(' / '));
+await p.locator('text=Finn rute').click();
 await p.waitForFunction(() => [...document.querySelectorAll('div')].some(e => e.style.fontSize === '46px'), null, { timeout: 10000 });
-console.log('tap recent → auto plan: OK');
+console.log('recent → Finn rute → results: OK');
 
 await ctx.close(); await browser.close();
 console.log(errors.length ? 'PAGE ERRORS:\n' + errors.join('\n') : 'no page errors');

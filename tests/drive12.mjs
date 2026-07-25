@@ -24,11 +24,11 @@ await p.locator('text=Finn rute').click();
 await p.waitForFunction(() => [...document.querySelectorAll('div')].some(e => e.style.fontSize === '46px'), null, { timeout: 15000 });
 
 // 1. sorted fastest first: first chip should have the smallest duration
-const chipTexts = await p.$$eval('div', els => els.filter(e => /^\d+h( \d+m)?$|^\d+m$/.test(e.textContent) && e.style.fontSize === '15px').map(e => e.textContent));
+const chipTexts = await p.$$eval('span', els => els.filter(e => /^\d+h( \d+m)?$|^\d+m$/.test(e.textContent) && e.style.fontSize === '15px').map(e => e.textContent));
 console.log('chips order:', chipTexts.join(' | '));
 const mins = t => { const m = /(?:(\d+)h)?\s*(?:(\d+)m)?/.exec(t); return (+(m[1]||0))*60+(+(m[2]||0)); };
 const sorted = chipTexts.every((t, i, a) => i === 0 || mins(a[i-1]) <= mins(t));
-console.log('sorted fastest→slowest:', sorted ? 'OK' : 'FAIL');
+console.log('sorted fastest→slowest:', chipTexts.length > 1 && sorted ? 'OK' : 'FAIL');
 
 // 2. red arrival (requested 06:00, actual later)
 const red = await p.$$eval('span', els => els.some(e => e.textContent.startsWith('ankomst') && e.style.color === 'var(--red)'));
