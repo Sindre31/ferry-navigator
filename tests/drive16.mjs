@@ -1,5 +1,7 @@
 import { chromium } from '/opt/node22/lib/node_modules/playwright/index.mjs';
-const SHOT = '/tmp/claude-0/-home-claude/3db2e60f-bf31-5e12-b82c-8381565e61b0/scratchpad/test';
+import { mkdirSync } from 'node:fs';
+const SHOT = process.env.SHOT_DIR || '/tmp/ferrynav-shots';
+mkdirSync(SHOT, { recursive: true });
 const browser = await chromium.launch();
 const ctx = await browser.newContext({ viewport: { width: 390, height: 780 } });
 const p = await ctx.newPage();
@@ -10,7 +12,8 @@ await p.evaluate(() => localStorage.clear());
 await p.reload({ waitUntil: 'domcontentloaded' });
 await p.waitForSelector('input[type=text]');
 
-// depart-at 12:08 (default mode) → departure should be pulled later to match ferry+buffer
+// depart-at 12:08 → you leave exactly at 12:08, the wait lands at the quay
+await p.locator('div:text-is("Kl.")').click();
 await p.locator('input[type=time]').fill('12:08');
 const inputs = p.locator('input[type=text]');
 await inputs.nth(0).fill('Bergen');
@@ -21,7 +24,7 @@ await p.locator('text=Finn rute').click();
 await p.waitForFunction(() => [...document.querySelectorAll('div')].some(e => e.style.fontSize === '46px'), null, { timeout: 15000 });
 const getLeave = () => p.$$eval('div', els => els.find(e => e.style.fontSize === '46px').textContent);
 const leave = await getLeave();
-console.log('depart adjusted to ferry+buffer:', leave, leave !== '12:08' ? 'OK (pulled later than 12:08)' : 'FAIL still 12:08');
+console.log('depart-at leaves exactly:', leave, leave === '12:08' ? 'OK exactly 12:08' : 'FAIL moved off 12:08');
 
 // tab bar visible on results, back button gone
 const planTab = await p.locator('div:text-is("Plan")').count();

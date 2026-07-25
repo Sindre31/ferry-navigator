@@ -6,14 +6,14 @@ const errors = [];
 p.on('pageerror', e => errors.push(e.message));
 await p.goto('http://127.0.0.1:8741/index.html', { waitUntil: 'domcontentloaded' });
 await p.waitForSelector('input[type=text]');
-await p.locator('text=Ankomst kl.').click();
+await p.locator('div:text-is("Ankomst")').click();
 const inputs = p.locator('input[type=text]');
 await inputs.nth(0).fill('Bergen');
 await p.locator('text=Bergen, Vestland').first().click();
 await inputs.nth(1).fill('Ålesund');
 await p.locator('text=Ålesund, Møre og Romsdal').first().click();
 await p.locator('text=Finn rute').click();
-await p.waitForSelector('text=Avreise senest', { timeout: 10000 });
+await p.waitForFunction(() => [...document.querySelectorAll('div')].some(e => e.style.fontSize === '46px'), null, { timeout: 10000 });
 
 const getChips = () => p.$$eval('div', els => els.filter(e => e.children.length === 0 && /^\d\d:\d\d( \+1)?$/.test(e.textContent) && e.style.cursor === 'pointer' && e.style.fontSize === '12px').map(e => e.textContent));
 const getLeave = () => p.$$eval('div', els => els.find(e => e.style.fontSize === '46px').textContent);

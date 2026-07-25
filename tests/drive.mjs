@@ -1,7 +1,9 @@
 import { chromium } from '/opt/node22/lib/node_modules/playwright/index.mjs';
+import { mkdirSync } from 'node:fs';
 
 const BASE = 'http://127.0.0.1:8741/index.html';
-const SHOT = '/tmp/claude-0/-home-claude/3db2e60f-bf31-5e12-b82c-8381565e61b0/scratchpad/test';
+const SHOT = process.env.SHOT_DIR || '/tmp/ferrynav-shots';
+mkdirSync(SHOT, { recursive: true });
 const browser = await chromium.launch();
 const errors = [];
 
@@ -34,7 +36,7 @@ const sugCount = await m.locator('text=Bergen, Vestland').count();
 console.log('suggestions after select:', sugCount <= 1 ? 'OK closed' : 'FAIL still open (' + sugCount + ')');
 await m.screenshot({ path: SHOT + '/1-mobile-plan.png' });
 await m.locator('text=Finn rute').click();
-await m.waitForSelector('text=Avreise senest', { timeout: 10000 });
+await m.waitForFunction(() => [...document.querySelectorAll('div')].some(e => e.style.fontSize === '46px'), null, { timeout: 10000 });
 console.log('route planned: OK');
 
 // share button → clipboard
@@ -48,7 +50,7 @@ await m.screenshot({ path: SHOT + '/2-mobile-results.png' });
 const m2 = await mctx.newPage();
 m2.on('pageerror', e => errors.push('share pageerror: ' + e.message));
 await m2.goto(clip.replace(/^https?:\/\/[^/]+\//, 'http://127.0.0.1:8741/'), { waitUntil: 'domcontentloaded' });
-await m2.waitForSelector('text=Avreise senest', { timeout: 10000 });
+await m2.waitForFunction(() => [...document.querySelectorAll('div')].some(e => e.style.fontSize === '46px'), null, { timeout: 10000 });
 console.log('shared link → results screen: OK');
 await m2.screenshot({ path: SHOT + '/3-shared-link.png' });
 await mctx.close();
@@ -63,7 +65,7 @@ const fw = await d.evaluate(() => {
   const el = document.querySelector('#root > div > div');
   return el ? el.getBoundingClientRect().width : 0;
 });
-console.log('desktop frame width:', fw, fw === 390 ? 'OK phone frame' : 'FAIL');
+console.log('desktop frame width:', fw, fw === 560 ? 'OK centered column' : 'FAIL');
 await d.screenshot({ path: SHOT + '/4-desktop.png' });
 await dctx.close();
 

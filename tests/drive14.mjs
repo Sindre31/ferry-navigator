@@ -1,5 +1,7 @@
 import { chromium } from '/opt/node22/lib/node_modules/playwright/index.mjs';
-const SHOT = '/tmp/claude-0/-home-claude/3db2e60f-bf31-5e12-b82c-8381565e61b0/scratchpad/test';
+import { mkdirSync } from 'node:fs';
+const SHOT = process.env.SHOT_DIR || '/tmp/ferrynav-shots';
+mkdirSync(SHOT, { recursive: true });
 const browser = await chromium.launch();
 const ctx = await browser.newContext({
   viewport: { width: 390, height: 780 },
@@ -13,7 +15,7 @@ await p.goto('http://127.0.0.1:8741/index.html', { waitUntil: 'domcontentloaded'
 await p.evaluate(() => localStorage.clear());
 await p.reload({ waitUntil: 'domcontentloaded' });
 await p.waitForSelector('input[type=text]');
-await p.locator('text=Ankomst kl.').click();
+await p.locator('div:text-is("Ankomst")').click();
 await p.locator('input[type=time]').fill('17:30');
 const inputs = p.locator('input[type=text]');
 await inputs.nth(0).fill('Bergen');
@@ -21,7 +23,7 @@ await p.locator('text=Bergen, Vestland').first().click();
 await inputs.nth(1).fill('Ålesund');
 await p.locator('text=Ålesund, Møre og Romsdal').first().click();
 await p.locator('text=Finn rute').click();
-await p.waitForSelector('text=Avreise senest', { timeout: 10000 });
+await p.waitForFunction(() => [...document.querySelectorAll('div')].some(e => e.style.fontSize === '46px'), null, { timeout: 10000 });
 
 // 1. start navigation
 await p.locator('text=▶ Start').click();
@@ -48,7 +50,7 @@ await p.screenshot({ path: SHOT + '/21-nav-arrived.png' });
 
 // 4. exit nav → back to results
 await p.locator('div:text-is("✕")').click();
-await p.waitForSelector('text=Avreise senest', { timeout: 5000 });
+await p.waitForFunction(() => [...document.querySelectorAll('div')].some(e => e.style.fontSize === '46px'), null, { timeout: 5000 });
 console.log('exit nav: OK back to results');
 
 await ctx.close(); await browser.close();

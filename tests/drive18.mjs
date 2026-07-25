@@ -1,5 +1,7 @@
 import { chromium } from '/opt/node22/lib/node_modules/playwright/index.mjs';
-const SHOT = '/tmp/claude-0/-home-claude/3db2e60f-bf31-5e12-b82c-8381565e61b0/scratchpad/test';
+import { mkdirSync } from 'node:fs';
+const SHOT = process.env.SHOT_DIR || '/tmp/ferrynav-shots';
+mkdirSync(SHOT, { recursive: true });
 const browser = await chromium.launch();
 const ctx = await browser.newContext({ viewport: { width: 390, height: 780 }, colorScheme: 'dark' });
 const p = await ctx.newPage();
@@ -10,20 +12,24 @@ await p.evaluate(() => localStorage.clear());
 await p.reload({ waitUntil: 'domcontentloaded' });
 await p.waitForSelector('input[type=text]');
 
-// dark by default (colorScheme dark)
+// light by default, even when the OS asks for dark
 const bg1 = await p.evaluate(() => getComputedStyle(document.body).backgroundColor);
-console.log('default dark bg:', bg1, bg1 === 'rgb(5, 7, 10)' ? 'OK' : 'FAIL');
+const txt = await p.evaluate(() => getComputedStyle([...document.querySelectorAll('div')].find(e => e.textContent === 'Plan tur')).color);
+console.log('default light bg:', bg1, '| heading', txt, bg1 === 'rgb(233, 237, 242)' && txt === 'rgb(23, 34, 43)' ? 'OK' : 'FAIL');
 
-// toggle to light
+// toggle to dark and back to light
+await p.locator('[title="Tema"]').click();
+await p.waitForTimeout(300);
+const bgDark = await p.evaluate(() => getComputedStyle(document.body).backgroundColor);
+console.log('toggled dark bg:', bgDark, bgDark === 'rgb(5, 7, 10)' ? 'OK' : 'FAIL');
 await p.locator('[title="Tema"]').click();
 await p.waitForTimeout(300);
 const bg2 = await p.evaluate(() => getComputedStyle(document.body).backgroundColor);
-const txt = await p.evaluate(() => getComputedStyle([...document.querySelectorAll('div')].find(e => e.textContent === 'Plan tur')).color);
-console.log('light mode: bg', bg2, '| heading', txt, bg2 === 'rgb(233, 237, 242)' && txt === 'rgb(23, 34, 43)' ? 'OK' : 'FAIL');
+console.log('back to light:', bg2, bg2 === 'rgb(233, 237, 242)' ? 'OK' : 'FAIL');
 await p.screenshot({ path: SHOT + '/26-light-plan.png' });
 
 // plan a route in light mode
-await p.locator('text=Ankomst kl.').click();
+await p.locator('div:text-is("Ankomst")').click();
 await p.locator('input[type=time]').fill('17:30');
 const inputs = p.locator('input[type=text]');
 await inputs.nth(0).fill('Bergen');

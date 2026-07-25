@@ -1,11 +1,20 @@
 <!DOCTYPE html>
-<html lang="no">
+<html lang="no" data-theme="light">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Ferry Navigator</title>
   <meta name="description" content="Planlegg bilturer med ferge i Norge – sanntids fergetider fra Entur">
-  <meta name="theme-color" content="#0B0E11">
+  <meta name="theme-color" content="#F5F7FA">
+  <script>
+    // Light is the default theme; apply a stored choice before first paint
+    (function(){try{
+      var t=localStorage.getItem('fn_theme')==='dark'?'dark':'light';
+      document.documentElement.dataset.theme=t;
+      var m=document.querySelector('meta[name=theme-color]');
+      if(m)m.setAttribute('content',t==='dark'?'#0B0E11':'#F5F7FA');
+    }catch(e){}})();
+  </script>
   <link rel="manifest" href="manifest.json">
   <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -26,14 +35,19 @@
     .scroll-hide{scrollbar-width:none;}
     input[type=range]{-webkit-appearance:none;appearance:none;background:transparent;width:100%;height:22px;cursor:pointer;}
     input[type=range]::-webkit-slider-runnable-track{height:6px;border-radius:3px;}
-    input[type=range]::-moz-range-track{height:6px;border-radius:3px;background:#0B0E11;}
-    input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;margin-top:-8px;border-radius:50%;background:#EDF1F5;box-shadow:0 2px 8px rgba(0,0,0,.6);cursor:pointer;}
-    input[type=range]::-moz-range-thumb{width:22px;height:22px;border:none;border-radius:50%;background:#EDF1F5;box-shadow:0 2px 8px rgba(0,0,0,.6);}
-    input[type=date],input[type=time]{color-scheme:dark;}
-    input[type=time]::-webkit-calendar-picker-indicator{filter:invert(.7);}
-    /* dark Leaflet */
-    .leaflet-control-attribution{background:rgba(0,0,0,.6)!important;color:#555!important;font-size:9px!important;}
-    .leaflet-control-attribution a{color:#777!important;}
+    input[type=range]::-moz-range-track{height:6px;border-radius:3px;background:var(--bg);}
+    input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;margin-top:-8px;border-radius:50%;background:var(--txt);box-shadow:0 2px 8px rgba(0,0,0,.35);cursor:pointer;}
+    input[type=range]::-moz-range-thumb{width:22px;height:22px;border:none;border-radius:50%;background:var(--txt);box-shadow:0 2px 8px rgba(0,0,0,.35);}
+    /* native date/time widgets follow the app theme */
+    [data-theme=dark] input[type=date],[data-theme=dark] input[type=time]{color-scheme:dark;}
+    [data-theme=light] input[type=date],[data-theme=light] input[type=time]{color-scheme:light;}
+    [data-theme=dark] input[type=time]::-webkit-calendar-picker-indicator,
+    [data-theme=dark] input[type=date]::-webkit-calendar-picker-indicator{filter:invert(.7);}
+    /* inputs must never widen their flex parent on narrow phones */
+    input{max-width:100%;}
+    /* Leaflet */
+    .leaflet-control-attribution{background:var(--glass2)!important;color:var(--mut)!important;font-size:9px!important;}
+    .leaflet-control-attribution a{color:var(--mut)!important;}
     .leaflet-marker-icon{background:none!important;border:none!important;}
   </style>
 </head>
@@ -50,13 +64,26 @@ const h=React.createElement;
 
 const ACC='var(--acc)',MUT='var(--mut)',PANEL='var(--panel)',DEF_MARGIN=5;
 
+// Time modes:
+//  now    – leave right away, best route from this minute
+//  by     – leave at the best moment between now and the chosen time
+//  leave  – leave exactly at the chosen time
+//  arrive – leave as late as possible and still arrive by the chosen time
+const MODES=['now','by','leave','arrive'];
+
 // ── i18n ───────────────────────────────────────────────────────────────────
 const STR={
 no:{
   planTitle:'Plan tur',from:'Fra',to:'Til',via:'Via',addVia:'+ Legg til via-punkt',
   placePH:'By, adresse, stoppested…',viaPH:'Innom sted…',myLoc:'Bruk min posisjon',
   date:'Dato',departAt:'Avreise kl.',arriveBy:'Ankomst kl.',nowBtn:'Nå',
-  stepArr:'Ankomst',stepDep:'Avreise',
+  modeNow:'Nå',modeBy:'Innen',modeAt:'Kl.',modeArr:'Ankomst',
+  stepArr:'Ankomst',stepDep:'Avreise',stepBy:'Avreise innen',
+  nowHint:'Beste rute akkurat nå',
+  byHint:'Finner beste avreisetid mellom nå og valgt klokkeslett',
+  atHint:'Du reiser presis på dette klokkeslettet',
+  arrHint:'Seneste avreise som gir ankomst i tide',
+  bestDep:'Beste avreise',
   buffer:'Fergebuffer',bufferSub:'Ekstra tid for å nå fergen',
   find:'Finn rute',finding:'⟳ Beregner rute…',
   latestDep:'Avreise senest',plainDep:'Avreise',
@@ -90,7 +117,13 @@ en:{
   planTitle:'Plan trip',from:'From',to:'To',via:'Via',addVia:'+ Add via point',
   placePH:'City, address, stop…',viaPH:'Stop by…',myLoc:'Use my location',
   date:'Date',departAt:'Depart at',arriveBy:'Arrive by',nowBtn:'Now',
-  stepArr:'Arrival',stepDep:'Departure',
+  modeNow:'Now',modeBy:'Within',modeAt:'At',modeArr:'Arrive',
+  stepArr:'Arrival',stepDep:'Departure',stepBy:'Depart within',
+  nowHint:'Best route right now',
+  byHint:'Finds the best departure between now and the chosen time',
+  atHint:'You leave exactly at this time',
+  arrHint:'Latest departure that still arrives in time',
+  bestDep:'Best departure',
   buffer:'Ferry buffer',bufferSub:'Extra time to catch the ferry',
   find:'Find route',finding:'⟳ Calculating route…',
   latestDep:'Leave by',plainDep:'Departure',
@@ -265,7 +298,7 @@ function parseShareUrl(){
   const mg=parseInt(q.get('buffer'),10);
   return{from,to,via,
     date:/^\d{4}-\d{2}-\d{2}$/.test(q.get('dato')||'')?q.get('dato'):todayOslo(),
-    mode:q.get('modus')==='leave'?'leave':'arrive',
+    mode:MODES.includes(q.get('modus'))?q.get('modus'):'arrive',
     timeMin:Math.min(1410,Math.max(0,parseInt(q.get('tid'),10)||1080)),
     vehicle:['ev','mc','long'].includes(q.get('kjt'))?q.get('kjt'):'car',
     margin:isNaN(mg)?DEF_MARGIN:Math.min(45,Math.max(-5,mg))};
@@ -513,6 +546,57 @@ async function reverseAddress(lat,lon){
 // ── route planner ──────────────────────────────────────────────────────────
 function shortStop(n){return n?n.replace(/\s*(ferjekai|fergekai|ferjeleie|fergeleie|kai)\s*$/i,'').trim():null;}
 
+// Earliest departure that makes sense for a plan: this minute when the trip
+// is today, midnight when it is a later date
+function windowStart(date){return date===todayOslo()?nowMinutes():0;}
+
+// Roll a journey forward from a home departure time → arrival time
+function forwardArrive(F,D,start,margin){
+  let t=start+(D[0]?.dur||0);
+  for(let i=0;i<F.length;i++){
+    const dep=earliestDep(F[i].dep,t+margin);
+    t=dep+F[i].crossingMin+(D[i+1]?.dur||0);
+  }
+  return t;
+}
+
+// When to leave home, per time mode (see MODES)
+function planLeaveBy(F,D,{mode,timeMin,margin,date}){
+  const drive0=D[0]?.dur||0;
+  if(mode==='arrive'){
+    let t=timeMin;
+    for(let i=F.length-1;i>=0;i--){
+      t-=D[i+1]?.dur||0;
+      t=latestDep(F[i].dep,t-F[i].crossingMin)-margin;
+    }
+    return t-drive0;
+  }
+  // 'now' and 'leave' both depart exactly at timeMin — for 'now' that minute
+  // is pinned to the clock when the route was planned
+  if(mode!=='by')return timeMin;
+  // 'by': try leaving right away, at the deadline, and at every time that
+  // lands you at ferry #1 with exactly the buffer — keep the quickest trip
+  const lo=Math.min(windowStart(date),timeMin),hi=timeMin;
+  const cands=[lo,hi];
+  if(F.length)for(const d of F[0].dep){
+    const t0=d-margin-drive0;
+    if(t0>lo&&t0<hi)cands.push(t0);
+  }
+  let best=null;
+  for(const t0 of cands){
+    const arrive=forwardArrive(F,D,t0,margin),total=arrive-t0;
+    if(!best||total<best.total||(total===best.total&&arrive<best.arrive))best={t0,total,arrive};
+  }
+  return best.t0;
+}
+
+// Floor under the home departure when another ferry is picked by hand:
+// fixed-time modes keep their time, "within" can never start in the past
+function reqLeaveFor({mode,timeMin,date}){
+  if(mode==='arrive')return null;
+  return mode==='by'?windowStart(date):timeMin;
+}
+
 async function planOneRoute(osrmRoute,{from,to,via,date,timeMin,mode,margin,lang,vehicle}){
   const S=STR[lang]||STR.no;
   const allSteps=osrmRoute.legs.flatMap(l=>l.steps);
@@ -556,24 +640,7 @@ async function planOneRoute(osrmRoute,{from,to,via,date,timeMin,mode,margin,lang
       dep:usable.length?usable:all.map(d=>d.t),allDeps:all,alerts,isLive};
   }));
 
-  // Backward scheduling for arrive-by mode
-  let leaveBy;
-  if(mode==='arrive'){
-    let t=timeMin;
-    for(let i=FERRIES.length-1;i>=0;i--){
-      t-=DRIVES[i+1]?.dur||0;
-      t=latestDep(FERRIES[i].dep,t-FERRIES[i].crossingMin)-margin;
-    }
-    leaveBy=t-(DRIVES[0]?.dur||0);
-  }else{
-    leaveBy=timeMin;
-    // With a ferry on the route, leave home so you reach ferry #1 with
-    // exactly the chosen buffer instead of waiting at the quay
-    if(FERRIES.length){
-      const dep1=earliestDep(FERRIES[0].dep,timeMin+(DRIVES[0]?.dur||0)+margin);
-      leaveBy=Math.max(timeMin,dep1-margin-(DRIVES[0]?.dur||0));
-    }
-  }
+  const leaveBy=planLeaveBy(FERRIES,DRIVES,{mode,timeMin,margin,date});
 
   // Forward pass → steps
   let t=leaveBy;
@@ -603,7 +670,7 @@ async function planOneRoute(osrmRoute,{from,to,via,date,timeMin,mode,margin,lang
     cost:ferryCost,costBreak:FERRIES.length?S.fareEst:S.withoutFerry,
     isFerry:FERRIES.length>0,boarded,kaiArr,drives:DRIVES,steps,ferries:FERRIES,osrmRoute,osrmSteps:allSteps,from,to,
     viaPoint:via||null,
-    reqLeave:mode==='leave'?timeMin:null,
+    reqLeave:reqLeaveFor({mode,timeMin,date}),
     via:osrmRoute.legs?.[0]?.summary||'',
     isLive:FERRIES.some(f=>f.isLive)};
 }
@@ -646,22 +713,11 @@ function bestDepartures(R,margin){
 
 // Recompute leave-by/boarded/steps for a result whose ferry schedules
 // were refreshed — same rules as the original plan, no API calls
-function scheduleResult(R,{timeMin,mode,margin,lang}){
+function scheduleResult(R,{timeMin,mode,margin,lang,date}){
   const S=STR[lang]||STR.no,F=R.ferries,D=R.drives;
   if(!F?.length||!D)return R;
   const n=F.length;
-  let leaveBy;
-  if(mode==='arrive'){
-    let t=timeMin;
-    for(let i=n-1;i>=0;i--){
-      t-=D[i+1]?.dur||0;
-      t=latestDep(F[i].dep,t-F[i].crossingMin)-margin;
-    }
-    leaveBy=t-(D[0]?.dur||0);
-  }else{
-    const dep1=earliestDep(F[0].dep,timeMin+(D[0]?.dur||0)+margin);
-    leaveBy=Math.max(timeMin,dep1-margin-(D[0]?.dur||0));
-  }
+  const leaveBy=planLeaveBy(F,D,{mode,timeMin,margin,date});
   let tc=leaveBy;
   const boarded=[],kaiArr=[],steps=[];
   steps.push({type:'depart',time:tc,timeColor:'var(--txt)',title:S.depart+' '+R.from.name,
@@ -679,7 +735,7 @@ function scheduleResult(R,{timeMin,mode,margin,lang}){
   }
   steps.push({type:'arrive',time:tc,timeColor:'var(--acc)',title:S.arriveT+' '+R.to.name,sub:S.done,hasSub2:false,notLast:false,ferryIdx:null});
   return{...R,leaveBy,arrive:tc,total:tc-leaveBy,boarded,kaiArr,steps,
-    reqLeave:mode==='leave'?timeMin:null,isLive:F.some(f=>f.isLive)};
+    reqLeave:reqLeaveFor({mode,timeMin,date}),isLive:F.some(f=>f.isLive)};
 }
 
 // Re-anchor the schedule on one explicitly chosen ferry departure.
@@ -761,10 +817,21 @@ function MapView({results,selIdx,selTotal,from,to,theme,onSelect}){
       const pl=L.polyline(sel.osrmRoute.geometry.coordinates.map(c=>[c[1],c[0]]),{color:mAcc,weight:4,opacity:.9}).addTo(map);
       bounds.extend(pl.getBounds());
     }
-    // Time badge per alternative — tap to select. Badges slide along their
-    // route until they stop overlapping each other.
+    const mk=(fill,border)=>L.divIcon({html:`<div style="width:13px;height:13px;border-radius:50%;background:${fill};border:3px solid ${border};box-sizing:border-box;"></div>`,className:'',iconSize:[13,13],iconAnchor:[6,6]});
+    if(from){L.marker([from.lat,from.lon],{icon:mk('var(--bg)',ACC)}).addTo(map);bounds.extend([from.lat,from.lon]);}
+    const viaPoint=results[selIdx]?.viaPoint;
+    if(viaPoint){L.marker([viaPoint.lat,viaPoint.lon],{icon:mk('var(--amber)','var(--amber)')}).addTo(map);bounds.extend([viaPoint.lat,viaPoint.lon]);}
+    if(to){L.marker([to.lat,to.lon],{icon:mk(ACC,ACC)}).addTo(map);bounds.extend([to.lat,to.lon]);}
+    if(bounds.isValid())map.fitBounds(bounds,{padding:[28,28]});
+    // Time badge per alternative — tap to select. Placed after the map is
+    // framed so badges can slide along their route until they no longer
+    // collide on screen (measured in pixels, not degrees).
     const span=(typeof bounds.getNorth==='function'&&bounds.isValid())
       ?Math.hypot(bounds.getNorth()-bounds.getSouth(),bounds.getEast()-bounds.getWest()):1;
+    const px=typeof map.latLngToContainerPoint==='function'
+      ?(a,b)=>{const p1=map.latLngToContainerPoint(a),p2=map.latLngToContainerPoint(b);return Math.hypot(p1.x-p2.x,p1.y-p2.y);}
+      :null;
+    const apart=(a,b)=>px?px(a,b)>74:Math.hypot(a[0]-b[0],a[1]-b[1])>span*0.09;
     const placedBadges=[];
     results.forEach((R,i)=>{
       const g=R.osrmRoute?.geometry?.coordinates;
@@ -772,7 +839,7 @@ function MapView({results,selIdx,selTotal,from,to,theme,onSelect}){
       let pt=null;
       for(const f of[0.5,0.42,0.58,0.34,0.66,0.26,0.74,0.18,0.82]){
         const c=g[Math.min(g.length-1,Math.floor(g.length*f))];
-        if(placedBadges.every(p=>Math.hypot(p[0]-c[1],p[1]-c[0])>span*0.09)){pt=c;break;}
+        if(placedBadges.every(p=>apart(p,[c[1],c[0]]))){pt=c;break;}
       }
       if(!pt)pt=g[Math.floor(g.length/2)];
       placedBadges.push([pt[1],pt[0]]);
@@ -785,12 +852,6 @@ function MapView({results,selIdx,selTotal,from,to,theme,onSelect}){
       const lm=L.marker([pt[1],pt[0]],{icon}).addTo(map);
       lm.on('click',()=>onSelect(i));
     });
-    const mk=(fill,border)=>L.divIcon({html:`<div style="width:13px;height:13px;border-radius:50%;background:${fill};border:3px solid ${border};box-sizing:border-box;"></div>`,className:'',iconSize:[13,13],iconAnchor:[6,6]});
-    if(from){L.marker([from.lat,from.lon],{icon:mk('var(--bg)',ACC)}).addTo(map);bounds.extend([from.lat,from.lon]);}
-    const viaPoint=results[selIdx]?.viaPoint;
-    if(viaPoint){L.marker([viaPoint.lat,viaPoint.lon],{icon:mk('var(--amber)','var(--amber)')}).addTo(map);bounds.extend([viaPoint.lat,viaPoint.lon]);}
-    if(to){L.marker([to.lat,to.lon],{icon:mk(ACC,ACC)}).addTo(map);bounds.extend([to.lat,to.lon]);}
-    if(bounds.isValid())map.fitBounds(bounds,{padding:[28,28]});
     // live ferry vessels on the selected route's crossings
     let vessels=[],vTimer=null;
     const bbox=ferryBBox(sel?.osrmSteps);
@@ -915,18 +976,30 @@ function PlanScreen({from,to,via,fromText,toText,viaText,fromSugs,toSugs,viaSugs
           h('input',{type:'date',value:date,min:todayOslo(),onChange:e=>on('date',e.target.value),
             style:{background:'var(--bg)',color:'var(--txt)',border:'1px solid var(--border)',padding:'7px 12px',borderRadius:10,fontFamily:"'JetBrains Mono',monospace",fontSize:13,fontWeight:600,cursor:'pointer',outline:'none'}})
         ),
-        h('div',{style:{display:'flex',background:'var(--bg)',borderRadius:12,padding:3,gap:3}},
-          h('div',{onClick:()=>on('setLeaveAt'),style:{flex:1,textAlign:'center',padding:9,borderRadius:10,fontSize:13,fontWeight:600,cursor:'pointer',background:mode==='leave'?ACC:'transparent',color:mode==='leave'?'var(--onacc)':MUT}},T.departAt),
-          h('div',{onClick:()=>on('setArriveBy'),style:{flex:1,textAlign:'center',padding:9,borderRadius:10,fontSize:13,fontWeight:700,cursor:'pointer',background:mode==='arrive'?ACC:'transparent',color:mode==='arrive'?'var(--onacc)':MUT}},T.arriveBy)
+        // Four time modes — the time field only applies to the last three
+        h('div',{style:{display:'grid',gridTemplateColumns:'repeat(4,1fr)',background:'var(--bg)',borderRadius:12,padding:3,gap:3}},
+          ...[['now',T.modeNow],['by',T.modeBy],['leave',T.modeAt],['arrive',T.modeArr]].map(([k,label])=>
+            h('div',{key:k,onClick:()=>on('setMode',k),
+              style:{textAlign:'center',padding:'9px 2px',borderRadius:10,fontSize:12.5,fontWeight:700,cursor:'pointer',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',
+                background:mode===k?ACC:'transparent',color:mode===k?'var(--onacc)':MUT}},label))
         ),
-        h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center'}},
-          h('span',{style:{color:MUT,fontSize:13}},mode==='arrive'?T.stepArr:T.stepDep),
-          h('div',{style:{display:'flex',alignItems:'center',gap:10}},
-            mode==='leave'&&h('div',{onClick:()=>on('timeNow'),style:{padding:'8px 13px',borderRadius:10,background:'var(--bg)',border:'1px solid var(--border)',fontSize:12,fontWeight:700,cursor:'pointer',color:ACC}},T.nowBtn),
-            h('input',{type:'time',value:fmt(timeMin),onChange:e=>on('timeSet',e.target.value),
-              style:{background:'var(--bg)',color:'var(--txt)',border:'1px solid var(--border)',padding:'7px 12px',borderRadius:10,fontFamily:"'JetBrains Mono',monospace",fontSize:16,fontWeight:700,cursor:'pointer',outline:'none'}})
+        mode==='now'
+          ?h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',gap:10}},
+              h('span',{style:{color:MUT,fontSize:13}},T.nowHint),
+              h('span',{style:{fontFamily:"'JetBrains Mono',monospace",fontSize:16,fontWeight:700,color:ACC,flex:'none'}},fmt(now))
+            )
+          :h('div',null,
+            h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',gap:10}},
+              h('span',{style:{color:MUT,fontSize:13}},mode==='arrive'?T.stepArr:mode==='by'?T.stepBy:T.stepDep),
+              h('div',{style:{display:'flex',alignItems:'center',gap:10,flex:'none'}},
+                mode!=='arrive'&&h('div',{onClick:()=>on('timeNow'),style:{padding:'8px 13px',borderRadius:10,background:'var(--bg)',border:'1px solid var(--border)',fontSize:12,fontWeight:700,cursor:'pointer',color:ACC}},T.nowBtn),
+                h('input',{type:'time',value:fmt(timeMin),onChange:e=>on('timeSet',e.target.value),
+                  style:{background:'var(--bg)',color:'var(--txt)',border:'1px solid var(--border)',padding:'7px 10px',borderRadius:10,fontFamily:"'JetBrains Mono',monospace",fontSize:16,fontWeight:700,cursor:'pointer',outline:'none',minWidth:0}})
+              )
+            ),
+            h('div',{style:{fontSize:11.5,color:MUT,marginTop:6,lineHeight:1.35}},
+              mode==='by'?T.byHint:mode==='arrive'?T.arrHint:T.atHint)
           )
-        )
       ),
       // Margin
       h('div',{style:{background:PANEL,borderRadius:20,padding:18}},
@@ -962,16 +1035,18 @@ function ResultsScreen({results,selIdx,result,mode,margin,timeMin,shared,vehicle
   const cost=R.ferries.reduce((s,f)=>s+(f.km!=null?ferryFare(f.km,vehicle):f.fare),0);
   const vehIcon={car:'🚗',ev:'⚡',mc:'🏍',long:'🚐'}[vehicle]||'🚗';
   return h('div',{style:{position:'absolute',left:0,right:0,top:0,bottom:'calc(74px + env(safe-area-inset-bottom))',display:'flex',flexDirection:'column'}},
-    // Map
-    h('div',{style:{position:'relative',height:272,flex:'none',overflow:'hidden'}},
+    // Map — shrinks with the viewport so the timeline keeps room on phones
+    h('div',{style:{position:'relative',height:'clamp(160px,28vh,272px)',flex:'none',overflow:'hidden'}},
       h(MapView,{results,selIdx,selTotal:R.total,from:R.from,to:R.to,theme,onSelect:i=>on('selAlt',i)}),
-      h('div',{style:{position:'absolute',right:16,top:'calc(16px + env(safe-area-inset-top))',padding:'7px 13px',borderRadius:30,background:'var(--glass)',backdropFilter:'blur(6px)',fontSize:12,fontWeight:600,border:'1px solid var(--border)',zIndex:400}},R.numFerries?T.ferriesN(R.numFerries):T.noFerryB),
-      R.isLive&&h('div',{style:{position:'absolute',right:16,bottom:14,padding:'4px 10px',borderRadius:20,background:'rgba(43,217,208,.2)',border:'1px solid '+ACC,fontSize:10,fontWeight:700,color:ACC,zIndex:400,letterSpacing:'.06em'}},T.liveData),
-      h('div',{onClick:()=>on('startNav'),style:{position:'absolute',left:16,bottom:14,padding:'10px 18px',borderRadius:24,background:ACC,color:'var(--onacc)',fontSize:13,fontWeight:700,fontFamily:"'Space Grotesk',sans-serif",cursor:'pointer',zIndex:400,boxShadow:'0 4px 16px rgba(43,217,208,.4)'}},'▶ '+T.navStart)
+      h('div',{style:{position:'absolute',right:16,top:'calc(14px + env(safe-area-inset-top))',padding:'7px 13px',borderRadius:30,background:'var(--glass)',backdropFilter:'blur(6px)',fontSize:12,fontWeight:600,border:'1px solid var(--border)',zIndex:400}},R.numFerries?T.ferriesN(R.numFerries):T.noFerryB),
+      R.isLive&&h('div',{style:{position:'absolute',right:16,bottom:32,padding:'4px 10px',borderRadius:20,background:'rgba(43,217,208,.2)',border:'1px solid '+ACC,fontSize:10,fontWeight:700,color:ACC,zIndex:400,letterSpacing:'.06em'}},T.liveData),
+      // sits above the sheet's rounded top, which overlaps the map by 22px
+      h('div',{onClick:()=>on('startNav'),style:{position:'absolute',left:16,bottom:32,padding:'10px 18px',borderRadius:24,background:ACC,color:'var(--onacc)',fontSize:13,fontWeight:700,fontFamily:"'Space Grotesk',sans-serif",cursor:'pointer',zIndex:400,boxShadow:'0 4px 16px rgba(43,217,208,.4)'}},'▶ '+T.navStart)
     ),
-    // Bottom sheet
-    h('div',{className:'scroll-hide',style:{flex:1,background:'var(--sheet)',borderRadius:'26px 26px 0 0',marginTop:-22,position:'relative',padding:'8px 20px 0',display:'flex',flexDirection:'column',overflowY:'auto',zIndex:2}},
-      h('div',{style:{width:38,height:4,borderRadius:2,background:'var(--line)',margin:'8px auto 14px'}}),
+    // Bottom sheet: fixed rounded shell, scrolling content clipped inside it
+    h('div',{style:{flex:1,minHeight:0,background:'var(--sheet)',borderRadius:'26px 26px 0 0',marginTop:-22,position:'relative',display:'flex',flexDirection:'column',overflow:'hidden',zIndex:2}},
+      h('div',{style:{width:38,height:4,borderRadius:2,background:'var(--line)',margin:'10px auto 8px',flex:'none'}}),
+      h('div',{className:'scroll-hide',style:{flex:1,minHeight:0,overflowY:'auto',WebkitOverflowScrolling:'touch',padding:'4px 20px 0',display:'flex',flexDirection:'column'}},
       // Route alternatives (ferry vs. driving around) — tap to switch
       results.length>1&&h('div',{className:'scroll-hide',style:{display:'flex',gap:8,marginBottom:14,overflowX:'auto',flex:'none'}},
         results.map((r,i)=>{
@@ -988,7 +1063,7 @@ function ResultsScreen({results,selIdx,result,mode,margin,timeMin,shared,vehicle
           );
         })
       ),
-      h('div',{style:{fontSize:12,color:MUT,letterSpacing:'.06em',textTransform:'uppercase'}},mode==='arrive'?T.latestDep:T.plainDep),
+      h('div',{style:{fontSize:12,color:MUT,letterSpacing:'.06em',textTransform:'uppercase'}},mode==='arrive'?T.latestDep:mode==='by'?T.bestDep:T.plainDep),
       h('div',{style:{display:'flex',alignItems:'baseline',gap:14}},
         h('div',{style:{fontFamily:"'JetBrains Mono',monospace",fontSize:46,fontWeight:700,letterSpacing:'-.02em',color:ACC}},fmt(R.leaveBy)),
         h('div',{style:{color:MUT,fontSize:13,lineHeight:1.35}},
@@ -1081,6 +1156,7 @@ function ResultsScreen({results,selIdx,result,mode,margin,timeMin,shared,vehicle
         h('div',{onClick:()=>on('share'),style:{padding:'14px 18px',borderRadius:16,background:PANEL,border:'1px solid '+(shared?ACC:'var(--border)'),color:shared?ACC:'var(--txt)',fontSize:14,fontWeight:700,fontFamily:"'Space Grotesk',sans-serif",cursor:'pointer',whiteSpace:'nowrap'}},shared?T.copied:T.share),
         R.numFerries>0&&h('div',{onClick:()=>on('openTT',0),style:{padding:'14px 22px',borderRadius:16,background:ACC,color:'var(--onacc)',fontSize:14,fontWeight:700,fontFamily:"'Space Grotesk',sans-serif",cursor:'pointer'}},T.timetables)
         )
+      )
       )
     )
   );
@@ -1384,15 +1460,16 @@ function App(){
   const [recents,setRecents]=useState(loadRecents);
   const [geoLoading,setGeoLoading]=useState(false);
   const [lang,setLang]=useState(()=>{try{return localStorage.getItem('fn_lang')==='en'?'en':'no';}catch(e){return 'no';}});
+  // Light is the default; dark only when the user has chosen it
   const [theme,setTheme]=useState(()=>{
-    try{
-      const t=localStorage.getItem('fn_theme');
-      if(t==='light'||t==='dark')return t;
-      return window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';
-    }catch(e){return 'dark';}
+    try{return localStorage.getItem('fn_theme')==='dark'?'dark':'light';}catch(e){return 'light';}
   });
 
-  useEffect(()=>{document.documentElement.dataset.theme=theme;},[theme]);
+  useEffect(()=>{
+    document.documentElement.dataset.theme=theme;
+    const m=document.querySelector('meta[name=theme-color]');
+    if(m)m.setAttribute('content',theme==='dark'?'#0B0E11':'#F5F7FA');
+  },[theme]);
   const [vehicle,setVehicle]=useState(()=>{try{const v=localStorage.getItem('fn_vehicle');return VEHICLES[v]?v:'car';}catch(e){return 'car';}});
   const [anchors,setAnchors]=useState({});
   const [nfText,setNfText]=useState('');
@@ -1402,7 +1479,7 @@ function App(){
   const [nfLoading,setNfLoading]=useState(false);
   const T=STR[lang];
   const [date,setDate]=useState(todayOslo);
-  const [mode,setMode]=useState('leave');
+  const [mode,setMode]=useState('now');
   const [timeMin,setTimeMin]=useState(()=>Math.min(1410,Math.ceil(nowMinutes()/5)*5));
   const [margin,setMargin]=useState(DEF_MARGIN);
   const [results,setResults]=useState(null);
@@ -1446,7 +1523,7 @@ function App(){
             const usable=r.deps.filter(d=>!d.cancelled).map(d=>d.t);
             return{...f,dep:usable.length?usable:r.deps.map(d=>d.t),allDeps:r.deps,alerts:r.alerts,isLive:true};
           });
-          return changed?scheduleResult({...R,ferries},{timeMin,mode,margin,lang}):R;
+          return changed?scheduleResult({...R,ferries},{timeMin,mode,margin,lang,date}):R;
         }));
       }finally{busy=false;}
     };
@@ -1477,11 +1554,14 @@ function App(){
     }
     setFrom(s.from);setTo(s.to);setFromText(s.from.name);setToText(s.to.name);
     if(s.via){setVia(s.via);setViaText(s.via.name);setShowVia(true);}
-    setDate(s.date);setMode(s.mode);setTimeMin(s.timeMin);setMargin(s.margin);setVehicle(s.vehicle);
+    // a shared "leave now" link means now for whoever opens it
+    const sTime=s.mode==='now'?nowMinutes():s.timeMin;
+    const sDate=s.mode==='now'?todayOslo():s.date;
+    setDate(sDate);setMode(s.mode);setTimeMin(sTime);setMargin(s.margin);setVehicle(s.vehicle);
     setLoading(true);
-    planAlternatives({from:s.from,to:s.to,via:s.via,date:s.date,timeMin:s.timeMin,mode:s.mode,margin:s.margin,vehicle:s.vehicle,lang:localStorage.getItem('fn_lang')==='en'?'en':'no'})
+    planAlternatives({from:s.from,to:s.to,via:s.via,date:sDate,timeMin:sTime,mode:s.mode,margin:s.margin,vehicle:s.vehicle,lang:localStorage.getItem('fn_lang')==='en'?'en':'no'})
       .then(r=>{setResults(r);setSelIdx(0);setScreen('results');
-        savePlan({results:r,selIdx:0,date:s.date,mode:s.mode,timeMin:s.timeMin,margin:s.margin,vehicle:s.vehicle});})
+        savePlan({results:r,selIdx:0,date:sDate,mode:s.mode,timeMin:sTime,margin:s.margin,vehicle:s.vehicle});})
       .catch(e=>setError(e.message==='NOROUTE'?STR.no.errNoRoute:STR.no.errGeneric))
       .finally(()=>setLoading(false));
   },[]);
@@ -1530,10 +1610,13 @@ function App(){
 
   function runPlan(f,t,v){
     setLoading(true);setError(null);
-    planAlternatives({from:f,to:t,via:v||null,date,timeMin,mode,margin,lang,vehicle})
+    // "Now" is pinned to the minute you asked, so the plan stops moving
+    const tm=mode==='now'?nowMinutes():timeMin;
+    if(tm!==timeMin)setTimeMin(tm);
+    planAlternatives({from:f,to:t,via:v||null,date,timeMin:tm,mode,margin,lang,vehicle})
       .then(r=>{setResults(r);setSelIdx(0);setSelectedFerry(0);setAnchors({});
         setScreen('results');addRecent(f,t);
-        savePlan({results:r,selIdx:0,date,mode,timeMin,margin,vehicle});})
+        savePlan({results:r,selIdx:0,date,mode,timeMin:tm,margin,vehicle});})
       .catch(e=>setError(e.message==='NOROUTE'?T.errNoRoute:T.errGeneric))
       .finally(()=>setLoading(false));
   }
@@ -1573,10 +1656,14 @@ function App(){
         });
         break;}
       case 'swap':{const f=from,t2=to,ft=fromText,tt=toText;setFrom(t2);setTo(f);setFromText(tt);setToText(ft);setFromSugs([]);setToSugs([]);break;}
-      case 'date': setDate(data);break;
-      case 'setLeaveAt': setMode('leave');setTimeMin(Math.min(1410,Math.ceil(nowMinutes()/5)*5));break;
+      // Leaving today behind makes "now" meaningless — fall back to a fixed time
+      case 'date': setDate(data);if(mode==='now'&&data!==todayOslo())setMode('leave');break;
+      case 'setMode':{
+        setMode(data);
+        if(data==='now'){setDate(todayOslo());setTimeMin(nowMinutes());}
+        else if(data!=='arrive'&&date===todayOslo())setTimeMin(t=>Math.max(t,Math.min(1410,Math.ceil(nowMinutes()/5)*5)));
+        break;}
       case 'timeNow': setTimeMin(Math.min(1410,Math.ceil(nowMinutes()/5)*5));break;
-      case 'setArriveBy': setMode('arrive');break;
       case 'timeSet':{
         const m2=/^(\d{1,2}):(\d{2})$/.exec(data||'');
         if(m2)setTimeMin(Math.min(1439,parseInt(m2[1],10)*60+parseInt(m2[2],10)));
@@ -1631,9 +1718,11 @@ function App(){
     h(TabBar,{screen,hasResult:!!result,T,on})
   );
 
-  // Full screen on phones; full-height centered column on iPad/PC
-  return h('div',{style:{position:'fixed',inset:0,background:'var(--bg2)',display:'flex',justifyContent:'center'}},
-    h('div',{style:{width:'100%',maxWidth:mobile?'100%':560,height:'100%',position:'relative',background:'var(--bg)',boxShadow:mobile?'none':'0 0 70px rgba(0,0,0,.65)'}},inner)
+  // Full screen on phones (100dvh follows the mobile browser chrome);
+  // full-height centered column on iPad/PC
+  return h('div',{style:{position:'fixed',inset:0,height:'100dvh',background:'var(--bg2)',display:'flex',justifyContent:'center'}},
+    h('div',{style:{width:'100%',maxWidth:mobile?'100%':560,height:'100%',position:'relative',overflow:'hidden',background:'var(--bg)',
+      boxShadow:mobile?'none':(theme==='light'?'0 0 44px rgba(20,35,50,.16)':'0 0 70px rgba(0,0,0,.65)')}},inner)
   );
 }
 

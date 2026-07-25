@@ -12,14 +12,14 @@ await p.locator('div:text-is("-5")').click();
 const active = await p.locator('div:text-is("-5")').evaluate(el => el.style.background);
 console.log('-5 selectable:', active.includes('43')||active.includes('var(--acc)') ? 'OK highlighted' : 'FAIL ' + active);
 // plan with -5 → buffer chip shows -5 min buffer
-await p.locator('text=Ankomst kl.').click();
+await p.locator('div:text-is("Ankomst")').click();
 const inputs = p.locator('input[type=text]');
 await inputs.nth(0).fill('Bergen');
 await p.locator('text=Bergen, Vestland').first().click();
 await inputs.nth(1).fill('Ålesund');
 await p.locator('text=Ålesund, Møre og Romsdal').first().click();
 await p.locator('text=Finn rute').click();
-await p.waitForSelector('text=Avreise senest', { timeout: 10000 });
+await p.waitForFunction(() => [...document.querySelectorAll('div')].some(e => e.style.fontSize === '46px'), null, { timeout: 10000 });
 const chip = await p.locator('text=-5 min buffer').count();
 console.log('planned with -5 buffer:', chip >= 1 ? 'OK' : 'FAIL');
 await ctx.close(); await browser.close();

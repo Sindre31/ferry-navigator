@@ -1,5 +1,7 @@
 import { chromium } from '/opt/node22/lib/node_modules/playwright/index.mjs';
-const SHOT = '/tmp/claude-0/-home-claude/3db2e60f-bf31-5e12-b82c-8381565e61b0/scratchpad/test';
+import { mkdirSync } from 'node:fs';
+const SHOT = process.env.SHOT_DIR || '/tmp/ferrynav-shots';
+mkdirSync(SHOT, { recursive: true });
 const browser = await chromium.launch();
 const ctx = await browser.newContext({ viewport: { width: 390, height: 780 }, permissions: ['clipboard-write','clipboard-read'] });
 const p = await ctx.newPage();
@@ -20,7 +22,7 @@ await p.locator('text=Bergen, Vestland').first().click();
 await inputs.nth(1).fill('Ålesund');
 await p.locator('text=Ålesund, Møre og Romsdal').first().click();
 await p.locator('text=Finn rute').click();
-await p.waitForSelector('text=Avreise senest', { timeout: 10000 });
+await p.waitForFunction(() => [...document.querySelectorAll('div')].some(e => e.style.fontSize === '46px'), null, { timeout: 10000 });
 const evFare = await p.locator('text=≈80 kr').count();
 console.log('EV fare:', evFare >= 1 ? 'OK ≈80 kr (half of 160)' : 'FAIL');
 
@@ -35,7 +37,7 @@ await p.locator('div:text-is("‹")').first().click();
 await p.waitForSelector('text=Finn rute', { timeout: 5000 });
 await p.locator('text=🚗 Bil').click();
 await p.locator('text=Finn rute').click();
-await p.waitForSelector('text=Avreise senest', { timeout: 10000 });
+await p.waitForFunction(() => [...document.querySelectorAll('div')].some(e => e.style.fontSize === '46px'), null, { timeout: 10000 });
 const carFare = await p.locator('text=≈160 kr').count();
 console.log('car fare:', carFare >= 1 ? 'OK ≈160 kr' : 'FAIL');
 await p.screenshot({ path: SHOT + '/16-vehicle.png' });

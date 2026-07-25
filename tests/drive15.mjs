@@ -1,5 +1,7 @@
 import { chromium } from '/opt/node22/lib/node_modules/playwright/index.mjs';
-const SHOT = '/tmp/claude-0/-home-claude/3db2e60f-bf31-5e12-b82c-8381565e61b0/scratchpad/test';
+import { mkdirSync } from 'node:fs';
+const SHOT = process.env.SHOT_DIR || '/tmp/ferrynav-shots';
+mkdirSync(SHOT, { recursive: true });
 const browser = await chromium.launch();
 const ctx = await browser.newContext({ viewport: { width: 390, height: 900 } });
 const p = await ctx.newPage();
@@ -9,7 +11,7 @@ await p.goto('http://127.0.0.1:8741/index.html', { waitUntil: 'domcontentloaded'
 await p.evaluate(() => { localStorage.clear(); localStorage.setItem('fn_gmaps_key', 'mock-key'); });
 await p.reload({ waitUntil: 'domcontentloaded' });
 await p.waitForSelector('input[type=text]');
-await p.locator('text=Ankomst kl.').click();
+await p.locator('div:text-is("Ankomst")').click();
 await p.locator('input[type=time]').fill('17:30');
 const inputs = p.locator('input[type=text]');
 await inputs.nth(0).fill('Bergen');
@@ -17,7 +19,7 @@ await p.locator('text=Bergen, Vestland').first().click();
 await inputs.nth(1).fill('Ålesund');
 await p.locator('text=Ålesund, Møre og Romsdal').first().click();
 await p.locator('text=Finn rute').click();
-await p.waitForSelector('text=Avreise senest', { timeout: 15000 });
+await p.waitForFunction(() => [...document.querySelectorAll('div')].some(e => e.style.fontSize === '46px'), null, { timeout: 15000 });
 // select coastal 2-ferry alternative
 await p.locator('text=2 ferger ·').first().click();
 await p.waitForTimeout(500);

@@ -8,7 +8,11 @@ Norsk fergeplanlegger for bilturer. Skriv inn hvor du skal — appen finner rute
 
 - **Alle ferger i Norge** — fergekryssinger oppdages automatisk fra rutedata (OpenStreetMap), ingen hardkodet sambandsliste
 - **Sanntids rutetider** fra Entur, inkludert driftsavvik og innstilte avganger
-- **Baklengs-planlegging** — «Ankomst kl. 18:00» gir seneste mulige avreise; «Avreise kl.» planlegger forover
+- **Fire tidsmodus** — velg hvordan turen skal tidsettes:
+  - **Nå** — beste rute akkurat nå; du drar dette minuttet
+  - **Innen kl.** — appen finner det beste avreisetidspunktet mellom nå og klokkeslettet (minst mulig venting)
+  - **Kl.** — du drar presis på klokkeslettet, eventuell venting havner på fergekaia
+  - **Ankomst kl.** — baklengs-planlegging: seneste avreise som gir ankomst i tide
 - **Rutealternativer** — ferge vs. kjøre rundt når begge er realistiske, som trykkbare kort og linjer på kartet
 - **Velg avgang** — de neste fergeavgangene vises som chips i tidslinjen; velg en annen og hele planen regnes om
 - **Rutetabell neste døgn** — fungerer over midnatt, morgendagens avganger merket «I MORGEN»
@@ -17,6 +21,7 @@ Norsk fergeplanlegger for bilturer. Skriv inn hvor du skal — appen finner rute
 - **Via-punkt**, **min posisjon** (GPS), **favoritter og nylige søk**, **delbare lenker** (hele ruten i URL-en)
 - **Installerbar PWA** — legg til på hjemskjerm, med offline-fallback via service worker
 - **Norsk og engelsk** UI (NO/EN-bryter, huskes)
+- **Lys modus som standard**, mørk modus ett trykk unna (☀️/🌙-bryteren, huskes)
 
 ## Datakilder
 
@@ -25,7 +30,7 @@ Norsk fergeplanlegger for bilturer. Skriv inn hvor du skal — appen finner rute
 | [Entur](https://developer.entur.org/) | Adressesøk (geocoder), fergetider, avvik og kanselleringer (journey-planner v3) |
 | [Google Maps Directions](https://developers.google.com/maps/documentation/javascript/directions) *(valgfritt)* | Primær bilruting med alternativer og fergedeteksjon — aktiveres med API-nøkkel |
 | [OSRM](http://project-osrm.org/) (demoserver) | Bilruting (fallback uten Google-nøkkel) |
-| [CartoDB](https://carto.com/) + [Leaflet](https://leafletjs.com/) | Mørke kartfliser og kartvisning |
+| [CartoDB](https://carto.com/) + [Leaflet](https://leafletjs.com/) | Kartfliser (lyse/mørke etter tema) og kartvisning |
 
 Alle kall gjøres direkte fra nettleseren — ingen backend. Google-ruting aktiveres med en API-nøkkel (Maps JavaScript API + Directions API): åpne appen én gang med `?gkey=DIN_NØKKEL` (lagres lokalt i nettleseren), eller sett `GOOGLE_KEY_DEFAULT` i `index.html` for alle brukere. Husk å begrense nøkkelen til appens domene i Google Cloud Console. Uten nøkkel brukes OSRM.
 

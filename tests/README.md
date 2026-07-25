@@ -36,4 +36,16 @@ Testene forventer `index.html` med:
 | drive15 | Ferge 1 flytter avreise; ferge 2 varsler |
 | drive16 | Avreise justeres til ferge, meny, iPad-oppsett |
 | drive17 | Beste avreisetider |
-| drive18 | Light mode |
+| drive18 | Lys modus (standard) + bytte til mørk |
+| drive19 | Auto-oppdatering, omruting, live fartøy, offline-plan |
+| drive20 | Tidsmodus: Nå / Innen / Kl. / Ankomst |
+
+Screenshots havner i `$SHOT_DIR` (standard `/tmp/ferrynav-shots`).
+
+### Kjente utdaterte tester
+
+`drive4`, `drive5`, `drive6` og `drive7` feiler på UI som er endret siden de ble
+skrevet (tilbake-knapp i rutetabellen, 🔔-varsler, kjøretøyvelger på plan-skjermen,
+forventning om at «velg tidligere avgang» går tilbake til utgangspunktet). De
+feilet likt før tidsmodus-endringen — funksjonaliteten dekkes av `drive8`,
+`drive15` og `drive16`.

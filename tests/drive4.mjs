@@ -1,7 +1,9 @@
 import { chromium } from '/opt/node22/lib/node_modules/playwright/index.mjs';
+import { mkdirSync } from 'node:fs';
 
 const BASE = 'http://127.0.0.1:8741/index.html';
-const SHOT = '/tmp/claude-0/-home-claude/3db2e60f-bf31-5e12-b82c-8381565e61b0/scratchpad/test';
+const SHOT = process.env.SHOT_DIR || '/tmp/ferrynav-shots';
+mkdirSync(SHOT, { recursive: true });
 const browser = await chromium.launch();
 const errors = [];
 const ctx = await browser.newContext({
@@ -27,7 +29,7 @@ await p.locator('input[type=text]').nth(1).fill('Førde'); // via input is now i
 await p.locator('text=Førde, Sunnfjord').first().click();
 await p.screenshot({ path: SHOT + '/9-plan-via.png' });
 await p.locator('text=Finn rute').click();
-await p.waitForSelector('text=Avreise senest', { timeout: 10000 });
+await p.waitForFunction(() => [...document.querySelectorAll('div')].some(e => e.style.fontSize === '46px'), null, { timeout: 10000 });
 console.log('via route planned: OK');
 
 // 3. Real fare estimate (5 km crossing → 60+5*20=160)
@@ -57,7 +59,7 @@ await p.screenshot({ path: SHOT + '/11-timetable-cancelled.png' });
 
 // 7. Recents: back to plan, row should exist; toggle favorite
 await p.locator('div:text-is("‹")').first().click(); // back to results
-await p.waitForSelector('text=Avreise senest', { timeout: 5000 });
+await p.waitForFunction(() => [...document.querySelectorAll('div')].some(e => e.style.fontSize === '46px'), null, { timeout: 5000 });
 await p.locator('div:text-is("‹")').first().click(); // back to plan
 await p.waitForSelector('text=Finn rute', { timeout: 5000 });
 const recentRow = await p.locator('text=Testveien 1 → Ålesund').count();
@@ -74,7 +76,7 @@ await p.waitForSelector('text=Finn rute', { timeout: 10000 });
 const persisted = await p.locator('div:text-is("★")').count();
 console.log('recents persist reload:', persisted >= 1 ? 'OK still favorite' : 'FAIL');
 await p.locator('text=Testveien 1 → Ålesund').first().click();
-await p.waitForSelector('text=Avreise senest', { timeout: 10000 });
+await p.waitForFunction(() => [...document.querySelectorAll('div')].some(e => e.style.fontSize === '46px'), null, { timeout: 10000 });
 console.log('tap recent → auto plan: OK');
 
 await ctx.close(); await browser.close();

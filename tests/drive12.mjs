@@ -1,5 +1,7 @@
 import { chromium } from '/opt/node22/lib/node_modules/playwright/index.mjs';
-const SHOT = '/tmp/claude-0/-home-claude/3db2e60f-bf31-5e12-b82c-8381565e61b0/scratchpad/test';
+import { mkdirSync } from 'node:fs';
+const SHOT = process.env.SHOT_DIR || '/tmp/ferrynav-shots';
+mkdirSync(SHOT, { recursive: true });
 const browser = await chromium.launch();
 const ctx = await browser.newContext({ viewport: { width: 390, height: 780 } });
 const p = await ctx.newPage();
@@ -11,7 +13,7 @@ await p.reload({ waitUntil: 'domcontentloaded' });
 await p.waitForSelector('input[type=text]');
 
 // arrive-by 06:00 → impossible → red arrival
-await p.locator('text=Ankomst kl.').click();
+await p.locator('div:text-is("Ankomst")').click();
 await p.locator('input[type=time]').fill('06:00');
 const inputs = p.locator('input[type=text]');
 await inputs.nth(0).fill('Bergen');
@@ -19,7 +21,7 @@ await p.locator('text=Bergen, Vestland').first().click();
 await inputs.nth(1).fill('Ålesund');
 await p.locator('text=Ålesund, Møre og Romsdal').first().click();
 await p.locator('text=Finn rute').click();
-await p.waitForSelector('text=Avreise senest', { timeout: 15000 });
+await p.waitForFunction(() => [...document.querySelectorAll('div')].some(e => e.style.fontSize === '46px'), null, { timeout: 15000 });
 
 // 1. sorted fastest first: first chip should have the smallest duration
 const chipTexts = await p.$$eval('div', els => els.filter(e => /^\d+h( \d+m)?$|^\d+m$/.test(e.textContent) && e.style.fontSize === '15px').map(e => e.textContent));

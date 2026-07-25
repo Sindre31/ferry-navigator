@@ -12,7 +12,7 @@ await p.goto('http://127.0.0.1:8741/index.html', { waitUntil: 'domcontentloaded'
 await p.evaluate(() => localStorage.clear());
 await p.reload({ waitUntil: 'domcontentloaded' });
 await p.waitForSelector('input[type=text]');
-await p.locator('text=Ankomst kl.').click();
+await p.locator('div:text-is("Ankomst")').click();
 await p.locator('input[type=time]').fill('17:30');
 const inputs = p.locator('input[type=text]');
 await inputs.nth(0).fill('Bergen');

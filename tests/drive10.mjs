@@ -9,10 +9,10 @@ await p.evaluate(() => localStorage.clear());
 await p.reload({ waitUntil: 'domcontentloaded' });
 await p.waitForSelector('input[type=text]');
 
-// 1. default mode = Avreise kl. with Nå button visible
-const nowBtn = await p.locator('div:text-is("Nå")').count();
-const depSel = await p.locator('text=Avreise kl.').evaluate(el => el.style.background);
-console.log('default depart-at:', nowBtn === 1 && depSel.includes('43') ? 'OK selected with Nå' : 'FAIL');
+// 1. default mode = Nå (leave right away), no time field
+const nowSel = await p.locator('div:text-is("Nå")').first().evaluate(el => el.style.background);
+const timeFields = await p.locator('input[type=time]').count();
+console.log('default depart-now:', nowSel.includes('acc') && timeFields === 0 ? 'OK Nå selected' : 'FAIL');
 
 // 2. plan with via → results in leave mode
 const inputs = p.locator('input[type=text]');
@@ -23,7 +23,7 @@ await p.locator('input[type=text]').nth(1).fill('Førde');
 await p.locator('text=Førde, Sunnfjord').first().click();
 await p.locator('input[type=text]').nth(2).fill('Ålesund');
 await p.locator('text=Ålesund, Møre og Romsdal').first().click();
-await p.locator('text=Ankomst kl.').click();
+await p.locator('div:text-is("Ankomst")').click();
 await p.locator('input[type=time]').fill('17:30');
 await p.locator('text=Finn rute').click();
 await p.waitForSelector('text=ankomst ', { timeout: 10000 });

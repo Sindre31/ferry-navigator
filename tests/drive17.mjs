@@ -1,5 +1,7 @@
 import { chromium } from '/opt/node22/lib/node_modules/playwright/index.mjs';
-const SHOT = '/tmp/claude-0/-home-claude/3db2e60f-bf31-5e12-b82c-8381565e61b0/scratchpad/test';
+import { mkdirSync } from 'node:fs';
+const SHOT = process.env.SHOT_DIR || '/tmp/ferrynav-shots';
+mkdirSync(SHOT, { recursive: true });
 const browser = await chromium.launch();
 const ctx = await browser.newContext({ viewport: { width: 390, height: 900 } });
 const p = await ctx.newPage();
@@ -9,6 +11,7 @@ await p.goto('http://127.0.0.1:8741/index.html', { waitUntil: 'domcontentloaded'
 await p.evaluate(() => { localStorage.clear(); localStorage.setItem('fn_gmaps_key', 'mock-key'); });
 await p.reload({ waitUntil: 'domcontentloaded' });
 await p.waitForSelector('input[type=text]');
+await p.locator('div:text-is("Kl.")').click();
 await p.locator('input[type=time]').fill('10:00');
 const inputs = p.locator('input[type=text]');
 await inputs.nth(0).fill('Bergen');
@@ -43,7 +46,10 @@ const bestLeave = await p.$$eval('div', els => {
 });
 await p.waitForTimeout(400);
 const after = await getLeave();
-console.log('pick BEST row:', before, '→', after, after === bestLeave ? 'OK leaveBy = best time' : `FAIL (expected ${bestLeave})`);
+// depart-at mode never moves the departure earlier than the time you asked for,
+// so an early best-row is clamped back to 10:00
+const want = bestLeave < '10:00' ? '10:00' : bestLeave;
+console.log('pick BEST row:', before, '→', after, after === want ? 'OK leaveBy = ' + want : `FAIL (expected ${want})`);
 
 await ctx.close(); await browser.close();
 console.log(errors.length ? 'PAGE ERRORS:\n' + errors.join('\n') : 'no page errors');
