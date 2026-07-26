@@ -39,9 +39,10 @@ Testene forventer `index.html` med:
 | drive18 | Lys modus (standard) + bytte til mørk |
 | drive19 | Auto-oppdatering, omruting, live fartøy, offline-plan |
 | drive20 | Tidsmodus: Nå / Innen / Kl. / Ankomst |
+| drive21 | Avvist Google-nøkkel: fallback til OSRM + melding |
 
 Screenshots havner i `$SHOT_DIR` (standard `/tmp/ferrynav-shots`).
 
-Alle 20 testene skal være grønne. `mock.html` genererer rutetider for i dag og i
+Alle 21 testene skal være grønne. `mock.html` genererer rutetider for i dag og i
 morgen i Oslo-tid, slik at appen bruker «live» data (ikke demo-rutene) og
 innstilte avganger havner innenfor rutetabellens vindu uansett når testene kjøres.

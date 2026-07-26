@@ -121,7 +121,10 @@ no:{
   tightWarn:m=>'⚠ Dårlig tid – bare '+m+' min margin på kaia',
   bestTimes:'Beste avreisetider',bestBadge:'BEST',bestHint:'Fergene korresponderer best på de grønne tidspunktene',
   errPos:'Fikk ikke tilgang til posisjonen din',errPosSupport:'Posisjon støttes ikke i denne nettleseren',
-  viaLabel:'via'
+  viaLabel:'via',
+  gkeyKey:'Google-nøkkelen gjelder ikke for dette domenet',gkeyQuota:'Google-kvoten er brukt opp',
+  gkeyLoad:'Google-kartruting kunne ikke lastes',
+  gkeyWarn:m=>'⚠ Ruting bruker reserveløsningen — '+m+'. Du kan få færre og litt grovere rutealternativer.'
 },
 en:{
   planTitle:'Plan trip',from:'From',to:'To',via:'Via',addVia:'+ Add via point',
@@ -161,7 +164,10 @@ en:{
   tightWarn:m=>'⚠ Tight – only '+m+' min margin at the quay',
   bestTimes:'Best departure times',bestBadge:'BEST',bestHint:'Ferry connections align best at the green times',
   errPos:'Could not access your location',errPosSupport:'Geolocation is not supported in this browser',
-  viaLabel:'via'
+  viaLabel:'via',
+  gkeyKey:'the Google key is not valid for this domain',gkeyQuota:'the Google quota is used up',
+  gkeyLoad:'Google routing could not be loaded',
+  gkeyWarn:m=>'⚠ Routing is on the fallback service — '+m+'. You may get fewer and slightly rougher alternatives.'
 }};
 
 // ── Google Maps routing (optional; falls back to OSRM without a key) ──────
@@ -179,15 +185,30 @@ const GOOGLE_KEY=(()=>{try{
   return localStorage.getItem('fn_gmaps_key')||GOOGLE_KEY_DEFAULT;
 }catch(e){return GOOGLE_KEY_DEFAULT;}})();
 
+// A key that is not valid for the domain it is served from fails silently —
+// the SDK just refuses and routing drops to OSRM. Remember why, so the app can
+// say so instead of quietly getting worse.
+let googleFault=null;
+function noteGoogleFault(reason){
+  if(googleFault)return;
+  googleFault=reason;
+  console.warn('[Ferry Navigator] Google-ruting er av ('+reason+'), bruker OSRM. '+
+    'Legg «'+location.hostname+'» til i API-nøkkelens tillatte referrers i Google Cloud Console '+
+    '(eller tøm GOOGLE_KEY_DEFAULT for å bruke OSRM med vilje).');
+}
+
 let gmapsLoader=null;
 function loadGoogle(){
   if(!GOOGLE_KEY)return Promise.resolve(null);
   if(window.google?.maps?.DirectionsService)return Promise.resolve(window.google);
   if(!gmapsLoader)gmapsLoader=new Promise(res=>{
+    // the SDK calls this on any authentication failure: wrong key, domain not
+    // allowed, billing disabled
+    window.gm_authFailure=()=>noteGoogleFault('key');
     const sc=document.createElement('script');
     sc.src=`https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(GOOGLE_KEY)}&language=no&region=NO`;
     sc.onload=()=>res(window.google?.maps?.DirectionsService?window.google:null);
-    sc.onerror=()=>res(null);
+    sc.onerror=()=>{noteGoogleFault('load');res(null);};
     document.head.appendChild(sc);
   });
   return gmapsLoader;
@@ -226,7 +247,11 @@ async function googleRoutes(points,opts){
     region:'no'
   };
   const res=await new Promise(resolve=>{
-    try{svc.route(req,(r,status)=>resolve(status==='OK'?r:null));}catch(e){resolve(null);}
+    try{svc.route(req,(r,status)=>{
+      if(status==='REQUEST_DENIED')noteGoogleFault('key');
+      else if(status==='OVER_QUERY_LIMIT')noteGoogleFault('quota');
+      resolve(status==='OK'?r:null);
+    });}catch(e){resolve(null);}
   });
   return res?res.routes.map(convertGoogleRoute):null;
 }
@@ -553,7 +578,10 @@ async function googleFind(points){
 // Route source orchestrator: Google when a key is configured, OSRM otherwise
 async function findRoutes(points){
   if(GOOGLE_KEY&&await loadGoogle()){
-    try{return await googleFind(points);}catch(e){if(e.message==='NOROUTE')throw e;}
+    try{return await googleFind(points);}
+    // "no route" is only trustworthy from a working key — a refused one
+    // answers nothing at all, and then OSRM has to do the job
+    catch(e){if(e.message==='NOROUTE'&&!googleFault)throw e;}
   }
   return routeOSRM(points);
 }
@@ -999,7 +1027,7 @@ function LangToggle({lang,theme,on}){
 }
 
 // ── PlanScreen ─────────────────────────────────────────────────────────────
-function PlanScreen({from,to,via,fromText,toText,viaText,fromSugs,toSugs,viaSugs,showVia,date,mode,timeMin,margin,now,loading,error,recents,geoLoading,T,lang,theme,on}){
+function PlanScreen({from,to,via,fromText,toText,viaText,fromSugs,toSugs,viaSugs,showVia,date,mode,timeMin,margin,now,loading,error,gkeyFault,recents,geoLoading,T,lang,theme,on}){
   const p=v=>({bg:margin===v?ACC:'var(--bg)',fg:margin===v?'var(--onacc)':MUT});
   const sugsStyle={marginTop:6,borderRadius:10,overflow:'hidden',border:'1px solid var(--border)'};
   const sugItem=(s,i,cb)=>h('div',{key:i,onClick:cb,style:{padding:'10px 14px',cursor:'pointer',background:i%2?'var(--suga)':'var(--sugb)',fontSize:13,color:'var(--txt)',display:'flex',gap:8,alignItems:'center'}},
@@ -1120,6 +1148,13 @@ function PlanScreen({from,to,via,fromText,toText,viaText,fromSugs,toSugs,viaSugs
         )
       ),
       error&&h('div',{style:{padding:'12px 16px',borderRadius:12,background:'rgba(255,80,80,.12)',border:'1px solid rgba(255,80,80,.3)',fontSize:13,color:'var(--red)'}},'⚠ '+error),
+      // Routing fell back to OSRM — say so instead of silently getting worse.
+      // The console warning next to it tells the owner how to fix the key.
+      gkeyFault&&h('div',{onClick:()=>on('dismissGkey'),
+        style:{padding:'11px 14px',borderRadius:12,background:'rgba(237,185,59,.12)',border:'1px solid rgba(237,185,59,.35)',fontSize:12.5,color:'var(--amber)',lineHeight:1.45,cursor:'pointer',display:'flex',gap:10,alignItems:'flex-start'}},
+        h('span',{style:{flex:1}},T.gkeyWarn(gkeyFault==='quota'?T.gkeyQuota:gkeyFault==='load'?T.gkeyLoad:T.gkeyKey)),
+        h('span',{style:{flex:'none',opacity:.7}},'✕')
+      ),
       // Find route
       h('div',{style:{paddingBottom:10}},
         h('div',{onClick:(!from||!to||loading)?null:()=>on('findRoute'),
@@ -1615,6 +1650,7 @@ function App(){
   const [selIdx,setSelIdx]=useState(0);
   const [loading,setLoading]=useState(false);
   const [error,setError]=useState(null);
+  const [gkeyFault,setGkeyFault]=useState(null); // Google refused; running on OSRM
   const [selectedFerry,setSelectedFerry]=useState(0);
   const [now,setNow]=useState(nowMinutes);
   const [shared,setShared]=useState(false);
@@ -1695,7 +1731,7 @@ function App(){
       .then(r=>{setResults(r);setSelIdx(0);setScreen('results');
         savePlan({results:r,selIdx:0,date:sDate,mode:s.mode,timeMin:sTime,margin:s.margin,vehicle:s.vehicle});})
       .catch(e=>setError(e.message==='NOROUTE'?STR.no.errNoRoute:STR.no.errGeneric))
-      .finally(()=>setLoading(false));
+      .finally(()=>{setLoading(false);setGkeyFault(f=>f===false?f:googleFault);});
   },[]);
 
   useEffect(()=>{
@@ -1750,7 +1786,7 @@ function App(){
         setScreen('results');addRecent(f,t);
         savePlan({results:r,selIdx:0,date,mode,timeMin:tm,margin,vehicle});})
       .catch(e=>setError(e.message==='NOROUTE'?T.errNoRoute:T.errGeneric))
-      .finally(()=>setLoading(false));
+      .finally(()=>{setLoading(false);setGkeyFault(f=>f===false?f:googleFault);});
   }
 
   function on(action,data){
@@ -1814,6 +1850,7 @@ function App(){
           navigator.clipboard.writeText(url).then(done).catch(()=>{});
         }
         break;}
+      case 'dismissGkey': setGkeyFault(false);break;
       case 'lang':{setLang(data);try{localStorage.setItem('fn_lang',data);}catch(e){}break;}
       case 'theme':{setTheme(data);try{localStorage.setItem('fn_theme',data);}catch(e){}break;}
       case 'vehicle':{setVehicle(data);try{localStorage.setItem('fn_vehicle',data);}catch(e){}break;}
@@ -1846,7 +1883,7 @@ function App(){
   const split=wide&&!navMode;
 
   const panel=[
-    screen==='plan'&&h(PlanScreen,{key:'plan',from,to,via,fromText,toText,viaText,fromSugs,toSugs,viaSugs,showVia,date,mode,timeMin,margin,now,loading,error,recents,geoLoading,T,lang,theme,on}),
+    screen==='plan'&&h(PlanScreen,{key:'plan',from,to,via,fromText,toText,viaText,fromSugs,toSugs,viaSugs,showVia,date,mode,timeMin,margin,now,loading,error,gkeyFault,recents,geoLoading,T,lang,theme,on}),
     screen==='results'&&result&&h(ResultsScreen,{key:'res',results,selIdx,result,mode,margin,timeMin,shared,vehicle,T,lang,theme,wide:split,on}),
     screen==='timetable'&&result&&h(TimetableScreen,{key:'tt',result,selectedFerry,now,T,lang,theme,on}),
     screen==='nextferry'&&h(NextFerryScreen,{key:'nf',T,lang,now,nfText,nfSugs,nfStop,nfDeps,nfLoading,theme,on}),
