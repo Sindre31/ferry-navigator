@@ -3,7 +3,7 @@ const browser = await chromium.launch();
 const ctx = await browser.newContext({ viewport: { width: 390, height: 780 }, permissions: ['clipboard-write', 'clipboard-read'] });
 const p = await ctx.newPage();
 // the two failures below are triggered on purpose — everything else is a bug
-const EXPECTED = /reading 'boom'|testavvisning/;
+const EXPECTED = /reading 'boom'|testavvisning|postetfeil|skalikkesendes/;
 const errors = [];
 p.on('pageerror', e => { if (!EXPECTED.test(e.message)) errors.push(e.message); });
 await p.goto('http://127.0.0.1:8741/index.html', { waitUntil: 'domcontentloaded' });
@@ -69,5 +69,34 @@ await p.waitForTimeout(200);
 const osrm = await p.locator('text=ruting (OSRM)').count();
 console.log('failing API logged:', osrm >= 1 ? 'OK' : 'FAIL');
 
+// 8. errors are posted to the deployment's own /api/log by default
+const posted = [];
+const ctx3 = await browser.newContext({ viewport: { width: 390, height: 780 } });
+await ctx3.route('**/api/log', route => {
+  posted.push(route.request().postData() || '');
+  route.fulfill({ status: 204, body: '' });
+});
+const p3 = await ctx3.newPage();
+p3.on('pageerror', () => {});
+await p3.goto('http://127.0.0.1:8741/index.html', { waitUntil: 'domcontentloaded' });
+await p3.evaluate(() => localStorage.clear());
+await p3.reload({ waitUntil: 'domcontentloaded' });
+await p3.waitForSelector('input[type=text]');
+await p3.evaluate(() => { Promise.reject(new Error('postetfeil')); });
+await p3.waitForTimeout(600);
+const body = posted[0] ? JSON.parse(posted[0]) : null;
+console.log('posts to /api/log by default:',
+  body && body.msg.includes('postetfeil') && body.app === 'ferry-navigator' && body.ua
+    ? 'OK ' + body.where + ' · ' + body.msg : 'FAIL ' + JSON.stringify(posted));
+
+// 9. ?logurl=off keeps everything on the device
+await p3.goto('http://127.0.0.1:8741/index.html?logurl=off', { waitUntil: 'domcontentloaded' });
+await p3.waitForSelector('input[type=text]');
+posted.length = 0;
+await p3.evaluate(() => { Promise.reject(new Error('skalikkesendes')); });
+await p3.waitForTimeout(600);
+const stillLogged = await p3.locator('text=feil registrert').count();
+console.log('?logurl=off stops sending:', posted.length === 0 && stillLogged >= 1 ? 'OK still logged locally' : `FAIL (sent ${posted.length}, local ${stillLogged})`);
+
 console.log(errors.length ? 'PAGE ERRORS:\n' + errors.join('\n') : 'no page errors');
-await ctx.close(); await browser.close();
+await ctx.close(); await ctx3.close(); await browser.close();

@@ -350,21 +350,28 @@ function buildShareUrl({from,to,via,date,mode,timeMin,margin,vehicle}){
 }
 
 // ── error log ──────────────────────────────────────────────────────────────
-// There is no backend to report to, so problems are kept on the device: the
-// last 20 are listed on the plan screen and can be copied into a bug report.
-// Open the app once with ?logurl=https://… to also POST them somewhere
-// (?logurl= with nothing after it turns that back off).
-const LOG_MAX=20;
+// Problems are kept on the device — the last 20 are listed on the plan screen
+// and can be copied into a bug report — and posted to /api/log, which writes
+// them to the deployment's runtime log (see api/log.js).
+//   ?logurl=https://…   send them somewhere else instead
+//   ?logurl=off         keep them on the device only
+//   ?logurl=            back to the default
+const LOG_MAX=20,LOG_DEFAULT='/api/log';
 const LOG_URL=(()=>{try{
   const q=new URLSearchParams(location.search),u=q.get('logurl');
-  if(u===null)return localStorage.getItem('fn_logurl')||'';
-  if(u)localStorage.setItem('fn_logurl',u);else localStorage.removeItem('fn_logurl');
-  q.delete('logurl');
-  history.replaceState(null,'',location.pathname+(q.toString()?'?'+q.toString():''));
-  return u;
-}catch(e){return '';}})();
+  let v=localStorage.getItem('fn_logurl');
+  if(u!==null){
+    if(u)localStorage.setItem('fn_logurl',u);else localStorage.removeItem('fn_logurl');
+    v=u||null;
+    q.delete('logurl');
+    history.replaceState(null,'',location.pathname+(q.toString()?'?'+q.toString():''));
+  }
+  if(v==='off')return '';
+  return v||LOG_DEFAULT;
+}catch(e){return LOG_DEFAULT;}})();
 
 let errorLog=(()=>{try{const l=JSON.parse(localStorage.getItem('fn_errors')||'[]');return Array.isArray(l)?l.slice(0,LOG_MAX):[];}catch(e){return[];}})();
+let logPosted=0; // a failure that repeats must not hammer the endpoint
 let onErrorLog=null;
 // host + path only: request URLs carry coordinates, and those are the user's
 function scrubUrl(u){try{const x=new URL(String(u),location.href);return x.host+x.pathname;}catch(e){return String(u).slice(0,60);}}
@@ -375,7 +382,9 @@ function logError(where,err,info){
   try{localStorage.setItem('fn_errors',JSON.stringify(errorLog));}catch(e){}
   console.error('[Ferry Navigator]',where,err,info||'');
   if(onErrorLog)onErrorLog(errorLog);
-  if(LOG_URL)try{fetch(LOG_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'application/json'},
+  // text/plain keeps it a simple request (no preflight) for endpoints that are
+  // not same-origin; keepalive lets it finish if the page is closing
+  if(LOG_URL&&logPosted<10)try{logPosted++;fetch(LOG_URL,{method:'POST',keepalive:true,headers:{'Content-Type':'text/plain;charset=UTF-8'},
     body:JSON.stringify({...entry,app:'ferry-navigator',host:location.host,ua:navigator.userAgent.slice(0,140)})}).catch(()=>{});}catch(e){}
 }
 function clearErrorLog(){errorLog=[];try{localStorage.removeItem('fn_errors');}catch(e){}if(onErrorLog)onErrorLog(errorLog);}

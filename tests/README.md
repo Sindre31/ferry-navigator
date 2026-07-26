@@ -40,10 +40,11 @@ Testene forventer `index.html` med:
 | drive19 | Auto-oppdatering, omruting, live fartøy, offline-plan |
 | drive20 | Tidsmodus: Nå / Innen / Kl. / Ankomst |
 | drive21 | Avvist Google-nøkkel: fallback til OSRM + melding |
-| drive22 | Feillogg: fangst, visning, kopiering, tømming |
+| drive22 | Feillogg: fangst, visning, kopiering, tømming, sending til /api/log |
+| apilog | `api/log.js` uten nettleser: gyldige og ugyldige kall, avkorting, død webhook |
 
 Screenshots havner i `$SHOT_DIR` (standard `/tmp/ferrynav-shots`).
 
-Alle 22 testene skal være grønne. `mock.html` genererer rutetider for i dag og i
+Alle 22 nettlesertestene skal være grønne. `node tests/apilog.mjs` kjører uten server. `mock.html` genererer rutetider for i dag og i
 morgen i Oslo-tid, slik at appen bruker «live» data (ikke demo-rutene) og
 innstilte avganger havner innenfor rutetabellens vindu uansett når testene kjøres.
