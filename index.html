@@ -124,7 +124,10 @@ no:{
   viaLabel:'via',
   gkeyKey:'Google-nøkkelen gjelder ikke for dette domenet',gkeyQuota:'Google-kvoten er brukt opp',
   gkeyLoad:'Google-kartruting kunne ikke lastes',
-  gkeyWarn:m=>'⚠ Ruting bruker reserveløsningen — '+m+'. Du kan få færre og litt grovere rutealternativer.'
+  gkeyWarn:m=>'⚠ Ruting bruker reserveløsningen — '+m+'. Du kan få færre og litt grovere rutealternativer.',
+  logLine:n=>'⚠ '+n+(n===1?' feil registrert':' feil registrert')+' i appen',
+  logHint:'Kopier listen og send den med hvis du melder fra om en feil.',
+  logCopy:'Kopier',logCopied:'✓ Kopiert',logClear:'Tøm'
 },
 en:{
   planTitle:'Plan trip',from:'From',to:'To',via:'Via',addVia:'+ Add via point',
@@ -167,7 +170,10 @@ en:{
   viaLabel:'via',
   gkeyKey:'the Google key is not valid for this domain',gkeyQuota:'the Google quota is used up',
   gkeyLoad:'Google routing could not be loaded',
-  gkeyWarn:m=>'⚠ Routing is on the fallback service — '+m+'. You may get fewer and slightly rougher alternatives.'
+  gkeyWarn:m=>'⚠ Routing is on the fallback service — '+m+'. You may get fewer and slightly rougher alternatives.',
+  logLine:n=>'⚠ '+n+(n===1?' error logged':' errors logged')+' in the app',
+  logHint:'Copy the list and include it if you report a problem.',
+  logCopy:'Copy',logCopied:'✓ Copied',logClear:'Clear'
 }};
 
 // ── Google Maps routing (optional; falls back to OSRM without a key) ──────
@@ -343,6 +349,42 @@ function buildShareUrl({from,to,via,date,mode,timeMin,margin,vehicle}){
   return location.origin+location.pathname+'?'+p.toString();
 }
 
+// ── error log ──────────────────────────────────────────────────────────────
+// There is no backend to report to, so problems are kept on the device: the
+// last 20 are listed on the plan screen and can be copied into a bug report.
+// Open the app once with ?logurl=https://… to also POST them somewhere
+// (?logurl= with nothing after it turns that back off).
+const LOG_MAX=20;
+const LOG_URL=(()=>{try{
+  const q=new URLSearchParams(location.search),u=q.get('logurl');
+  if(u===null)return localStorage.getItem('fn_logurl')||'';
+  if(u)localStorage.setItem('fn_logurl',u);else localStorage.removeItem('fn_logurl');
+  q.delete('logurl');
+  history.replaceState(null,'',location.pathname+(q.toString()?'?'+q.toString():''));
+  return u;
+}catch(e){return '';}})();
+
+let errorLog=(()=>{try{const l=JSON.parse(localStorage.getItem('fn_errors')||'[]');return Array.isArray(l)?l.slice(0,LOG_MAX):[];}catch(e){return[];}})();
+let onErrorLog=null;
+// host + path only: request URLs carry coordinates, and those are the user's
+function scrubUrl(u){try{const x=new URL(String(u),location.href);return x.host+x.pathname;}catch(e){return String(u).slice(0,60);}}
+function logError(where,err,info){
+  const entry={t:fmt(nowMinutes()),where,msg:String(err&&err.message||err||'ukjent feil').slice(0,160)};
+  if(info)entry.info=String(info).slice(0,120);
+  errorLog=[entry,...errorLog].slice(0,LOG_MAX);
+  try{localStorage.setItem('fn_errors',JSON.stringify(errorLog));}catch(e){}
+  console.error('[Ferry Navigator]',where,err,info||'');
+  if(onErrorLog)onErrorLog(errorLog);
+  if(LOG_URL)try{fetch(LOG_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({...entry,app:'ferry-navigator',host:location.host,ua:navigator.userAgent.slice(0,140)})}).catch(()=>{});}catch(e){}
+}
+function clearErrorLog(){errorLog=[];try{localStorage.removeItem('fn_errors');}catch(e){}if(onErrorLog)onErrorLog(errorLog);}
+window.addEventListener('error',e=>{
+  if(!e.error&&!e.message)return; // resource load noise
+  logError('script',e.error||e.message,e.filename?scrubUrl(e.filename)+':'+e.lineno:'');
+});
+window.addEventListener('unhandledrejection',e=>logError('promise',e.reason));
+
 // Active plan survives reloads and offline periods (12h shelf life)
 function savePlan(obj){try{localStorage.setItem('fn_plan',JSON.stringify({...obj,ts:Date.now()}));}catch(e){}}
 function loadPlan(){
@@ -447,7 +489,7 @@ async function loadFerryQuays(a,b){
       // or cruise quays you cannot drive onto
       .filter(s=>/fer[jg]e/i.test(s.name))
       .map(s=>({name:s.name,lat:s.latitude,lon:s.longitude}));
-  }catch(e){return[];}
+  }catch(e){logError('fergekaier',e);return[];}
 }
 
 // Encoded polylines instead of GeoJSON coordinate arrays: same geometry at a
@@ -482,7 +524,7 @@ async function fetchOSRM(points,params){
       for(const leg of rt.legs||[])for(const st of leg.steps||[])st.geometry=asGeoJson(st.geometry);
     }
     return d.routes||[];
-  }catch(e){return [];}
+  }catch(e){logError('ruting (OSRM)',e);return [];}
 }
 
 async function routeOSRM(points){
@@ -760,7 +802,10 @@ async function planOneRoute(osrmRoute,{from,to,via,date,timeMin,mode,margin,lang
     ]);
     let all=[],alerts=[],isLive=false;
     if(stopA?.id){
-      try{const r=await getFerryDeps(stopA.id,date);all=r.deps;alerts=r.alerts;isLive=all.length>0;}catch(e){}
+      // no live schedule → the plan falls back to a generic half-hour grid,
+      // which is worth knowing about when a plan looks odd
+      try{const r=await getFerryDeps(stopA.id,date);all=r.deps;alerts=r.alerts;isLive=all.length>0;}
+      catch(e){logError('rutetider',e,stopA.name||stopA.id);}
     }
     if(!all.length)all=gen(360,1380,30).concat(gen(1800,2820,30)).map(t=>({t,cancelled:false}));
     const usable=all.filter(d=>!d.cancelled).map(d=>d.t);
@@ -1027,7 +1072,8 @@ function LangToggle({lang,theme,on}){
 }
 
 // ── PlanScreen ─────────────────────────────────────────────────────────────
-function PlanScreen({from,to,via,fromText,toText,viaText,fromSugs,toSugs,viaSugs,showVia,date,mode,timeMin,margin,now,loading,error,gkeyFault,recents,geoLoading,T,lang,theme,on}){
+function PlanScreen({from,to,via,fromText,toText,viaText,fromSugs,toSugs,viaSugs,showVia,date,mode,timeMin,margin,now,loading,error,gkeyFault,log,logCopied,recents,geoLoading,T,lang,theme,on}){
+  const [logOpen,setLogOpen]=useState(false);
   const p=v=>({bg:margin===v?ACC:'var(--bg)',fg:margin===v?'var(--onacc)':MUT});
   const sugsStyle={marginTop:6,borderRadius:10,overflow:'hidden',border:'1px solid var(--border)'};
   const sugItem=(s,i,cb)=>h('div',{key:i,onClick:cb,style:{padding:'10px 14px',cursor:'pointer',background:i%2?'var(--suga)':'var(--sugb)',fontSize:13,color:'var(--txt)',display:'flex',gap:8,alignItems:'center'}},
@@ -1160,6 +1206,24 @@ function PlanScreen({from,to,via,fromText,toText,viaText,fromSugs,toSugs,viaSugs
         h('div',{onClick:(!from||!to||loading)?null:()=>on('findRoute'),
           style:{background:from&&to&&!loading?ACC:'var(--sugb)',color:from&&to&&!loading?'var(--onacc)':MUT,textAlign:'center',padding:17,borderRadius:18,fontSize:16,fontWeight:700,fontFamily:"'Space Grotesk',sans-serif",cursor:from&&to&&!loading?'pointer':'default',boxShadow:from&&to&&!loading?'0 8px 24px -6px rgba(43,217,208,.5)':'none'}},
           loading?T.finding:T.find)
+      ),
+      // Diagnostics: only visible once something has actually failed
+      log.length>0&&h('div',{style:{paddingBottom:20}},
+        h('div',{onClick:()=>setLogOpen(v=>!v),style:{fontSize:11.5,color:MUT,cursor:'pointer',textAlign:'center',padding:'2px 0 6px'}},
+          T.logLine(log.length)+(logOpen?' ▴':' ▾')),
+        logOpen&&h('div',{style:{borderRadius:14,border:'1px solid var(--border)',background:PANEL,overflow:'hidden'}},
+          h('div',{className:'scroll-hide',style:{maxHeight:190,overflowY:'auto'}},
+            log.map((e,i)=>h('div',{key:i,style:{padding:'8px 12px',borderBottom:i<log.length-1?'1px solid var(--border2)':'none',fontSize:11,lineHeight:1.45}},
+              h('div',{style:{color:MUT,fontFamily:"'JetBrains Mono',monospace"}},e.t+' · '+e.where),
+              h('div',{style:{color:'var(--txt)',wordBreak:'break-word'}},e.msg+(e.info?' ('+e.info+')':''))
+            ))
+          ),
+          h('div',{style:{display:'flex',alignItems:'center',gap:8,padding:'9px 12px',borderTop:'1px solid var(--border2)'}},
+            h('span',{style:{flex:1,fontSize:11,color:MUT,lineHeight:1.35}},T.logHint),
+            h('div',{onClick:()=>on('copyLog'),style:{padding:'7px 11px',borderRadius:9,border:'1px solid '+(logCopied?ACC:'var(--border)'),color:logCopied?ACC:'var(--txt)',fontSize:11.5,fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}},logCopied?T.logCopied:T.logCopy),
+            h('div',{onClick:()=>on('clearLog'),style:{padding:'7px 11px',borderRadius:9,border:'1px solid var(--border)',color:MUT,fontSize:11.5,fontWeight:700,cursor:'pointer'}},T.logClear)
+          )
+        )
       )
     )
   );
@@ -1651,6 +1715,9 @@ function App(){
   const [loading,setLoading]=useState(false);
   const [error,setError]=useState(null);
   const [gkeyFault,setGkeyFault]=useState(null); // Google refused; running on OSRM
+  const [log,setLog]=useState(errorLog);
+  const [logCopied,setLogCopied]=useState(false);
+  useEffect(()=>{onErrorLog=setLog;return()=>{onErrorLog=null;};},[]);
   const [selectedFerry,setSelectedFerry]=useState(0);
   const [now,setNow]=useState(nowMinutes);
   const [shared,setShared]=useState(false);
@@ -1680,7 +1747,7 @@ function App(){
         results.forEach(R=>(R.ferries||[]).forEach(f=>{if(f.stopId)stops[f.stopId]=null;}));
         const ids=Object.keys(stops);
         if(!ids.length)return;
-        await Promise.all(ids.map(async id=>{try{stops[id]=await getFerryDeps(id,date);}catch(e){}}));
+        await Promise.all(ids.map(async id=>{try{stops[id]=await getFerryDeps(id,date);}catch(e){logError('oppdatering av rutetider',e,id);}}));
         setResults(prev=>prev&&prev.map(R=>{
           let changed=false;
           const ferries=(R.ferries||[]).map(f=>{
@@ -1730,31 +1797,31 @@ function App(){
     planAlternatives({from:s.from,to:s.to,via:s.via,date:sDate,timeMin:sTime,mode:s.mode,margin:s.margin,vehicle:s.vehicle,lang:localStorage.getItem('fn_lang')==='en'?'en':'no'})
       .then(r=>{setResults(r);setSelIdx(0);setScreen('results');
         savePlan({results:r,selIdx:0,date:sDate,mode:s.mode,timeMin:sTime,margin:s.margin,vehicle:s.vehicle});})
-      .catch(e=>setError(e.message==='NOROUTE'?STR.no.errNoRoute:STR.no.errGeneric))
+      .catch(e=>{if(e.message!=='NOROUTE')logError('delt lenke',e);setError(e.message==='NOROUTE'?STR.no.errNoRoute:STR.no.errGeneric);})
       .finally(()=>{setLoading(false);setGkeyFault(f=>f===false?f:googleFault);});
   },[]);
 
   useEffect(()=>{
     if(fromText.length<2||(from&&from.name===fromText)){setFromSugs([]);return;}
-    const t=setTimeout(()=>searchPlaces(fromText).then(setFromSugs).catch(()=>{}),350);
+    const t=setTimeout(()=>searchPlaces(fromText).then(setFromSugs).catch(e=>logError('stedssøk',e)),350);
     return()=>clearTimeout(t);
   },[fromText,from]);
 
   useEffect(()=>{
     if(toText.length<2||(to&&to.name===toText)){setToSugs([]);return;}
-    const t=setTimeout(()=>searchPlaces(toText).then(setToSugs).catch(()=>{}),350);
+    const t=setTimeout(()=>searchPlaces(toText).then(setToSugs).catch(e=>logError('stedssøk',e)),350);
     return()=>clearTimeout(t);
   },[toText,to]);
 
   useEffect(()=>{
     if(viaText.length<2||(via&&via.name===viaText)){setViaSugs([]);return;}
-    const t=setTimeout(()=>searchPlaces(viaText).then(setViaSugs).catch(()=>{}),350);
+    const t=setTimeout(()=>searchPlaces(viaText).then(setViaSugs).catch(e=>logError('stedssøk',e)),350);
     return()=>clearTimeout(t);
   },[viaText,via]);
 
   useEffect(()=>{
     if(nfText.length<2||(nfStop&&nfStop.name===nfText)){setNfSugs([]);return;}
-    const t=setTimeout(()=>searchQuays(nfText).then(setNfSugs).catch(()=>{}),350);
+    const t=setTimeout(()=>searchQuays(nfText).then(setNfSugs).catch(e=>logError('kaisøk',e)),350);
     return()=>clearTimeout(t);
   },[nfText,nfStop]);
 
@@ -1785,7 +1852,7 @@ function App(){
       .then(r=>{setResults(r);setSelIdx(0);setSelectedFerry(0);setAnchors({});
         setScreen('results');addRecent(f,t);
         savePlan({results:r,selIdx:0,date,mode,timeMin:tm,margin,vehicle});})
-      .catch(e=>setError(e.message==='NOROUTE'?T.errNoRoute:T.errGeneric))
+      .catch(e=>{if(e.message!=='NOROUTE')logError('ruteplanlegging',e);setError(e.message==='NOROUTE'?T.errNoRoute:T.errGeneric);})
       .finally(()=>{setLoading(false);setGkeyFault(f=>f===false?f:googleFault);});
   }
 
@@ -1851,6 +1918,13 @@ function App(){
         }
         break;}
       case 'dismissGkey': setGkeyFault(false);break;
+      case 'clearLog': clearErrorLog();break;
+      case 'copyLog':{
+        const txt='Ferry Navigator · '+location.host+'\n'+navigator.userAgent+'\n'+
+          log.map(e=>e.t+' · '+e.where+' · '+e.msg+(e.info?' ('+e.info+')':'')).join('\n');
+        const done=()=>{setLogCopied(true);setTimeout(()=>setLogCopied(false),2200);};
+        if(navigator.clipboard)navigator.clipboard.writeText(txt).then(done).catch(()=>{});
+        break;}
       case 'lang':{setLang(data);try{localStorage.setItem('fn_lang',data);}catch(e){}break;}
       case 'theme':{setTheme(data);try{localStorage.setItem('fn_theme',data);}catch(e){}break;}
       case 'vehicle':{setVehicle(data);try{localStorage.setItem('fn_vehicle',data);}catch(e){}break;}
@@ -1883,7 +1957,7 @@ function App(){
   const split=wide&&!navMode;
 
   const panel=[
-    screen==='plan'&&h(PlanScreen,{key:'plan',from,to,via,fromText,toText,viaText,fromSugs,toSugs,viaSugs,showVia,date,mode,timeMin,margin,now,loading,error,gkeyFault,recents,geoLoading,T,lang,theme,on}),
+    screen==='plan'&&h(PlanScreen,{key:'plan',from,to,via,fromText,toText,viaText,fromSugs,toSugs,viaSugs,showVia,date,mode,timeMin,margin,now,loading,error,gkeyFault,log,logCopied,recents,geoLoading,T,lang,theme,on}),
     screen==='results'&&result&&h(ResultsScreen,{key:'res',results,selIdx,result,mode,margin,timeMin,shared,vehicle,T,lang,theme,wide:split,on}),
     screen==='timetable'&&result&&h(TimetableScreen,{key:'tt',result,selectedFerry,now,T,lang,theme,on}),
     screen==='nextferry'&&h(NextFerryScreen,{key:'nf',T,lang,now,nfText,nfSugs,nfStop,nfDeps,nfLoading,theme,on}),
